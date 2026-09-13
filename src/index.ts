@@ -8,6 +8,7 @@ import { createGmailClient } from "./gmail.ts";
 import { runFlow, type FlowDependencies, type FlowRecord } from "./hermes.ts";
 import type { CapabilityProfile } from "./matcher.ts";
 import { createSlackInteractionServer, createSlackSocketModeClient, extractPdfText, postApproval } from "./slack.ts";
+import type { SlackActionClient } from "./slack.ts";
 import { createSheetsClient } from "./sheets.ts";
 import { getResult, saveResult } from "./storage.ts";
 
@@ -145,6 +146,48 @@ function publicResult(result: FlowRecord): Record<string, unknown> {
   };
 }
 
+function slackMessageTarget(value: unknown): { channelId?: string; ts?: string } {
+  if (!value || typeof value !== "object") return {};
+  const record = value as Record<string, unknown>;
+  const container = record.container && typeof record.container === "object"
+    ? record.container as Record<string, unknown>
+    : {};
+  const message = record.message && typeof record.message === "object"
+    ? record.message as Record<string, unknown>
+    : {};
+  const channelId = typeof container.channel_id === "string"
+    ? container.channel_id
+    : typeof message.channel === "string"
+      ? message.channel
+      : undefined;
+  const ts = typeof message.ts === "string" ? message.ts : undefined;
+  return { channelId, ts };
+}
+
+async function updateSlackApproval(
+  client: SlackActionClient | undefined,
+  body: unknown,
+  decision: "approve" | "reject",
+  result: FlowRecord,
+): Promise<void> {
+  const target = slackMessageTarget(body);
+  if (!client || !target.channelId || !target.ts) return;
+  const text = decision === "reject"
+    ? "Rejected\nNo email created\nRecorded in Google Sheets"
+    : result.emailStatus === "sent"
+      ? "Approved\nGmail message sent\nRecorded in Google Sheets"
+      : "Approved\nGmail draft created\nRecorded in Google Sheets";
+  await client.chat.update({
+    channel: target.channelId,
+    ts: target.ts,
+    text,
+    blocks: [{
+      type: "section",
+      text: { type: "mrkdwn", text },
+    }],
+  });
+}
+
 function createDependencies(): FlowDependencies {
   const emailMode = (process.env.GMAIL_MODE || process.env.EMAIL_MODE) as
     ("dry_run" | "draft" | "live" | undefined);
@@ -221,26 +264,30 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
           }, null, 2));
         }
       },
-      onDecision: async ({ actionId, decision }) => {
+      onDecision: async ({ actionId, decision, body, client: slackClient }) => {
         if (handled) return;
         if (actionId !== pending.actionId) {
           throw new Error("slack: received an action for a different opportunity");
         }
         handled = true;
-        const resumed = await runFlow({
-          profile,
-          decision,
-          recipientEmail: recipientEmail(),
-          dependencies: {
-            ...dependencies,
-            fetchJobs: async () => [pending.job],
-            generateOutreach: async () => pending.outreach,
-            postApproval: async () => pending.slack,
-          },
-          draftId: pending.emailDraftId,
-        });
-        console.log(JSON.stringify(publicResult(resumed), null, 2));
-        await client.close();
+        try {
+          const resumed = await runFlow({
+            profile,
+            decision,
+            recipientEmail: recipientEmail(),
+            dependencies: {
+              ...dependencies,
+              fetchJobs: async () => [pending.job],
+              generateOutreach: async () => pending.outreach,
+              postApproval: async () => pending.slack,
+            },
+            draftId: pending.emailDraftId,
+          });
+          console.log(JSON.stringify(publicResult(resumed), null, 2));
+          await updateSlackApproval(slackClient, body, decision, resumed);
+        } finally {
+          await client.close();
+        }
       },
     });
     await client.connect();

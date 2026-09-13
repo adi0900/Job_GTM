@@ -52,10 +52,28 @@ export interface SlackInteractionServer {
   close: () => Promise<void>;
 }
 
+export interface SlackActionClient {
+  chat: {
+    update: (input: {
+      channel: string;
+      ts: string;
+      text: string;
+      blocks?: unknown[];
+    }) => Promise<unknown>;
+  };
+}
+
+export interface SlackDecisionContext {
+  actionId: string;
+  decision: ApprovalDecision;
+  body?: unknown;
+  client?: SlackActionClient;
+}
+
 export interface SlackSocketModeOptions extends SlackJudgePolicy {
   botToken?: string;
   appToken?: string;
-  onDecision: (decision: { actionId: string; decision: ApprovalDecision }) => Promise<void>;
+  onDecision: (decision: SlackDecisionContext) => Promise<void>;
   onMessage?: (message: NormalizedSlackMessage) => Promise<void>;
   fileIngestion?: Omit<SlackFileIngestionOptions, "botToken">;
   fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -598,7 +616,7 @@ export function createSlackSocketModeClient(options: SlackSocketModeOptions): Sl
         appToken: options.appToken,
         socketMode: true,
       });
-      app.action("approve_send", async ({ ack, body }) => {
+      app.action("approve_send", async ({ ack, body, client }) => {
         await ack();
         if (!judgeContextAllowed(body, options)) {
           console.log("SLACK_JUDGE_ACTION_BLOCKED");
@@ -606,9 +624,15 @@ export function createSlackSocketModeClient(options: SlackSocketModeOptions): Sl
         }
         console.log("SLACK_APPROVE_RECEIVED");
         const decision = parseSlackInteraction(body);
-        if (decision) await options.onDecision(decision);
+        if (decision) {
+          await options.onDecision({
+            ...decision,
+            body,
+            client: client as unknown as SlackActionClient,
+          });
+        }
       });
-      app.action("reject", async ({ ack, body }) => {
+      app.action("reject", async ({ ack, body, client }) => {
         await ack();
         if (!judgeContextAllowed(body, options)) {
           console.log("SLACK_JUDGE_ACTION_BLOCKED");
@@ -616,7 +640,13 @@ export function createSlackSocketModeClient(options: SlackSocketModeOptions): Sl
         }
         console.log("SLACK_REJECT_RECEIVED");
         const decision = parseSlackInteraction(body);
-        if (decision) await options.onDecision(decision);
+        if (decision) {
+          await options.onDecision({
+            ...decision,
+            body,
+            client: client as unknown as SlackActionClient,
+          });
+        }
       });
       if (options.onMessage) {
         app.event("app_mention", async ({ event, client }) => {
