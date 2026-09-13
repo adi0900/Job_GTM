@@ -167,7 +167,6 @@ async function main(): Promise<void> {
       await waitForSlackApproval(profile, result, dependencies);
     }
   } catch (error) {
-    await healthServer.close();
     throw error;
   }
 }
