@@ -16,8 +16,7 @@ The core loop is:
 Greenhouse
 → capability matching
 → opportunity scoring
-→ Hermes orchestration
-→ Gemini reasoning
+→ direct Gemini reasoning
 → Slack approval
 → Gmail execution
 → Google Sheets record
@@ -273,15 +272,7 @@ email status
 
 ### AI + Agent Runtime
 
-The system also uses:
-
-**Hermes**
-
-```text
-runtime operator
-workflow coordination
-tool orchestration
-```
+The final AWS-hosted demo uses the direct Odyva runtime for workflow coordination and tool orchestration. Hermes Agent v0.21.2 remains installed on AWS as an evaluated fallback, but it does not power the final happy path because its native Gemini provider is blocked by an authentication-header error.
 
 **Gemini API**
 
@@ -652,16 +643,14 @@ Greenhouse
 greenhouse.ts
    ↓
 NormalizedJob
-   ↓
+    ↓
 matcher.ts
-   ↓
+    ↓
 OpportunityMatch
-   ↓
-Hermes
-   ↓
-Gemini API
-   ↓
-Slack
+    ↓
+Direct Gemini API
+    ↓
+Slack Socket Mode
    ↓
 Gmail
    ↓
@@ -702,6 +691,42 @@ odyva-gtm/
 ---
 
 # Safety
+
+## Current Hackathon Runtime
+
+Hermes Agent v0.21.2 was installed and evaluated on AWS, but its native Gemini provider returned an authentication-header error despite the same credential succeeding against Google's API directly. To keep the hackathon execution path reliable, the final AWS-hosted agent calls Gemini directly.
+
+External apps:
+
+```text
+Greenhouse
+Slack Socket Mode
+Gmail (draft mode)
+Google Sheets
+```
+
+AI:
+
+```text
+Gemini (gemini-2.5-flash-lite)
+```
+
+Hosting:
+
+```text
+AWS EC2
+```
+
+The final demo path is:
+
+```text
+real Greenhouse job
+→ deterministic capability matcher
+→ direct Gemini API
+→ Slack Socket Mode approval
+→ Gmail draft
+→ Google Sheets row
+```
 
 Development defaults should remain safe.
 

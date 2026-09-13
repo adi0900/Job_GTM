@@ -38,6 +38,25 @@ export interface SlackInteractionServer {
   close: () => Promise<void>;
 }
 
+export interface SlackSocketModeOptions {
+  appToken?: string;
+  onDecision: (decision: { actionId: string; decision: ApprovalDecision }) => Promise<void>;
+  fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
+}
+
+export interface SlackSocketModeClient {
+  connect: () => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface SlackWebSocket {
+  addEventListener: (type: string, listener: (event: unknown) => void) => void;
+  send: (data: string) => void;
+  close: () => void;
+}
+
+type SlackWebSocketConstructor = new (url: string) => SlackWebSocket;
+
 function escapeSlack(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -194,6 +213,81 @@ export function createSlackInteractionServer(options: SlackInteractionServerOpti
   return {
     listen: () => new Promise<void>((resolve) => server.listen(options.port, "0.0.0.0", resolve)),
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+export function createSlackSocketModeClient(options: SlackSocketModeOptions): SlackSocketModeClient {
+  let socket: SlackWebSocket | undefined;
+  let closed = false;
+
+  const handleMessage = (event: unknown): void => {
+    const data =
+      event && typeof event === "object" && "data" in event
+        ? (event as { data?: unknown }).data
+        : undefined;
+    const text = typeof data === "string" ? data : "";
+    if (!text) return;
+
+    let envelope: Record<string, unknown>;
+    try {
+      envelope = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    const envelopeId = typeof envelope.envelope_id === "string" ? envelope.envelope_id : undefined;
+    if (envelopeId && socket) {
+      socket.send(JSON.stringify({ envelope_id: envelopeId }));
+    }
+
+    const decision = parseSlackInteraction(envelope.payload);
+    if (decision) {
+      void options.onDecision(decision).catch((error: unknown) => {
+        console.error(error instanceof Error ? error.message : String(error));
+      });
+    }
+  };
+
+  return {
+    connect: async () => {
+      if (!options.appToken) {
+        throw new Error("Slack: SLACK_APP_TOKEN is required for Socket Mode");
+      }
+      const WebSocketImpl = (globalThis as typeof globalThis & {
+        WebSocket?: SlackWebSocketConstructor;
+      }).WebSocket;
+      if (!WebSocketImpl) {
+        throw new Error("Slack: this Node runtime does not provide WebSocket support");
+      }
+
+      const fetchImpl = options.fetchImpl || fetch;
+      const response = await fetchImpl("https://slack.com/api/apps.connections.open", {
+        method: "POST",
+        headers: { authorization: "Bearer " + options.appToken },
+      });
+      const payload = (await response.json()) as { ok?: boolean; url?: string; error?: string };
+      if (!response.ok || payload.ok !== true || !payload.url) {
+        throw new Error("Slack: Socket Mode connection failed" + (payload.error ? ": " + payload.error : ""));
+      }
+
+      closed = false;
+      socket = new WebSocketImpl(payload.url);
+      socket.addEventListener("message", handleMessage);
+      await new Promise<void>((resolve, reject) => {
+        const current = socket;
+        if (!current) {
+          reject(new Error("Slack: Socket Mode socket was not created"));
+          return;
+        }
+        current.addEventListener("open", () => resolve());
+        current.addEventListener("error", () => reject(new Error("Slack: Socket Mode socket failed")));
+      });
+    },
+    close: async () => {
+      closed = true;
+      socket?.close();
+      socket = undefined;
+    },
   };
 }
 

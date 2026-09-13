@@ -6,7 +6,7 @@ import { generateOutreach } from "./gemini.ts";
 import { createGmailClient } from "./gmail.ts";
 import { runFlow, type FlowDependencies, type FlowRecord } from "./hermes.ts";
 import type { CapabilityProfile } from "./matcher.ts";
-import { createSlackInteractionServer, postApproval } from "./slack.ts";
+import { createSlackInteractionServer, createSlackSocketModeClient, postApproval } from "./slack.ts";
 import { createSheetsClient } from "./sheets.ts";
 import { getResult, saveResult } from "./storage.ts";
 
@@ -117,6 +117,42 @@ function createDependencies(): FlowDependencies {
 }
 
 async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRecord, dependencies: FlowDependencies): Promise<void> {
+  if (process.env.SLACK_SOCKET_MODE === "true") {
+    let client: ReturnType<typeof createSlackSocketModeClient>;
+    let handled = false;
+    client = createSlackSocketModeClient({
+      appToken: process.env.SLACK_APP_TOKEN,
+      onDecision: async ({ actionId, decision }) => {
+        if (handled) return;
+        if (actionId !== pending.actionId) {
+          throw new Error("slack: received an action for a different opportunity");
+        }
+        handled = true;
+        const resumed = await runFlow({
+          profile,
+          decision,
+          recipientEmail: process.env.GMAIL_TO,
+          dependencies: {
+            ...dependencies,
+            fetchJobs: async () => [pending.job],
+            generateOutreach: async () => pending.outreach,
+            postApproval: async () => pending.slack,
+          },
+        });
+        console.log(JSON.stringify(publicResult(resumed), null, 2));
+        await client.close();
+      },
+    });
+    await client.connect();
+    console.log(JSON.stringify({
+      status: "waiting_for_slack_approval",
+      transport: "socket_mode",
+      actionId: pending.actionId,
+    }, null, 2));
+    await new Promise<void>(() => {});
+    return;
+  }
+
   let server: ReturnType<typeof createSlackInteractionServer>;
   server = createSlackInteractionServer({
     port: Number(process.env.SLACK_PORT || 3000),
