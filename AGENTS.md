@@ -1,823 +1,514 @@
 # AGENTS.md
 
-# Odyva GTM Agent Instructions
+# Odyva GTM Hackathon Agent Instructions
+
+## Goal
+
+Build the smallest complete Odyva GTM demo that proves the product thesis.
+
+The hackathon MVP must show one end-to-end flow:
+
+```text
+live job signal
+→ normalize
+→ match against capability profile
+→ score opportunity
+→ Hermes
+→ Gemini API
+→ Slack approval
+→ Gmail send or dry-run
+→ save result
+```
+
+Do not optimize for production architecture.
+
+Optimize for:
+
+- working demo
+- clear product story
+- visible outputs
+- minimal moving parts
+- fast verification
+- safe execution
+
+---
 
 ## Product
 
-Odyva GTM is a 24/7 autonomous GTM operating system.
+Odyva GTM is a 24/7 GTM search and conversion assistant.
 
-Its job is to continuously discover live buying intent, match that intent against a verified capability profile, recommend the highest-probability action, route external communication through human approval, execute through deterministic integrations, and learn from outcomes.
+It continuously looks for companies showing live buying intent, matches those opportunities against a verified capability profile, prepares the best outreach, asks for human approval in Slack, and then executes.
 
-Production runtime:
-
-```text
-AWS
-  ↓
-Hermes
-  ↓
-Gemini API
-  ↓
-Domain tools
-  ↓
-Human approval in Slack
-  ↓
-Execution
-  ↓
-Outcomes
-  ↓
-Memory
-  ↓
-Next run
-```
-
-Sol and Luna are development-only models.
-
-They may assist with coding, testing, architecture, debugging, and development workflows.
-
-They must never be represented as production agents, production inference providers, or runtime dependencies.
-
----
-
-## Core Product Loop
+The hackathon demo should prove:
 
 ```text
-live intent
-  ↓
-normalize signal
-  ↓
-match against capability profile
-  ↓
-score opportunity
-  ↓
-Hermes decides recommended action
-  ↓
-Gemini performs bounded reasoning / generation
-  ↓
-Slack approval
-  ↓
-execute through API / MCP / script
-  ↓
-record outcome
-  ↓
-update memory
-  ↓
-improve future ranking
+we know what you can do
++
+we find who needs it now
++
+we explain why the match is strong
++
+we prepare the action
++
+you approve
++
+the system executes
 ```
 
-The system is not a cold-email generator.
-
-It is a closed-loop GTM operating system.
-
 ---
 
-## Primary Runtime Responsibilities
-
-### AWS
-
-AWS is the infrastructure and runtime layer.
-
-Expected responsibilities include:
-
-- compute
-- scheduling
-- queues
-- persistence
-- secrets
-- observability
-- storage
-- recovery
-- production networking
-
-AWS is not the reasoning layer.
-
----
+## Production Roles
 
 ### Hermes
 
-Hermes is the production agentic operating layer.
+Hermes is the production operator.
 
-Hermes is responsible for:
+For the hackathon, Hermes should coordinate:
 
-- planning
-- tool selection
-- workflow coordination
-- execution state
-- memory access
-- checkpoints
-- policy enforcement
-- deciding when human approval is required
+- opportunity analysis
+- tool calls
+- reasoning flow
+- action preparation
 
-Hermes must call domain-level tools.
+Do not build a complex agent framework.
 
-Hermes must not contain vendor-specific integration logic.
-
-Good:
-
-```text
-Hermes
-  ↓
-searchOpportunities()
-  ↓
-intent connector
-  ↓
-Greenhouse
-```
-
-Bad:
-
-```text
-Hermes
-  ↓
-raw Greenhouse HTTP request
-```
-
----
+Expose a few clear tools and keep the orchestration understandable.
 
 ### Gemini API
 
-Gemini is the primary production AI provider.
+Gemini is the main AI caller.
 
-Use Gemini for bounded tasks such as:
+Use it for:
 
-- structured extraction
-- classification
-- synthesis
-- evidence interpretation
-- personalization
-- message generation
-- reasoning over structured context
+- job pain extraction
+- capability matching support
+- company reasoning
+- outreach generation
+- concise opportunity explanation
 
-Do not allow Gemini to become the source of truth for deterministic system state.
+Do not scatter Gemini calls across the codebase.
 
-Do not let Gemini directly perform irreversible external actions.
+Keep Gemini access in one file or one small provider module.
 
-All Gemini access must go through the central AI provider abstraction.
+### AWS
+
+AWS may be used to host the demo runtime.
+
+Do not build a distributed AWS architecture for the hackathon.
+
+No need for:
+
+- SQS
+- EventBridge
+- ECS service mesh
+- dead-letter queues
+- distributed tracing
+- multi-region infrastructure
+
+If local execution is faster, build locally first.
+
+### Sol + Luna
+
+Sol and Luna are development-only.
+
+They may assist with coding and debugging.
+
+They are not part of the runtime demo.
+
+---
+
+## Hackathon Scope
+
+### Must Have
+
+1. fetch at least one real live opportunity
+2. normalize it
+3. compare it against a structured capability profile
+4. calculate an explainable match score
+5. generate a short match explanation
+6. generate a personalized outbound email
+7. send the approval request to Slack
+8. support approve / reject
+9. on approval, send or dry-run Gmail
+10. save the final result
+
+### Nice to Have
+
+Only after the full loop works:
+
+- Lever in addition to Greenhouse
+- ATS resume rendering
+- Google Sheets logging
+- simple dashboard
+- recent-job filter
+- contact lookup
+- basic memory
+
+### Out of Scope
+
+Do not build during the hackathon:
+
+- multi-tenancy
+- microservices
+- queue infrastructure
+- complex event architecture
+- full CRM abstraction
+- advanced observability
+- production-grade retry orchestration
+- full memory graph
+- generalized plugin system
+- computer-use automation
+- multiple AI providers
+- large eval framework
+
+---
+
+## Recommended Repo Shape
+
+```text
+odyva-gtm/
+├── AGENTS.md
+├── README.md
+├── docs/
+│   ├── VISION.md
+│   ├── ARCHITECTURE.md
+│   ├── CURRENT_STATE.md
+│   └── DEMO_FLOW.md
+├── src/
+│   ├── index.ts
+│   ├── greenhouse.ts
+│   ├── matcher.ts
+│   ├── hermes.ts
+│   ├── gemini.ts
+│   ├── slack.ts
+│   ├── gmail.ts
+│   └── storage.ts
+├── data/
+│   ├── capability_profile.json
+│   └── results.json
+├── tests/
+│   └── flow.test.ts
+├── .env.example
+├── package.json
+└── tsconfig.json
+```
+
+Do not create extra packages or services unless the current codebase already needs them.
+
+---
+
+## Core Data Flow
+
+```text
+Greenhouse
+  ↓
+greenhouse.ts
+  ↓
+NormalizedJob
+  ↓
+matcher.ts
+  ↓
+OpportunityMatch
+  ↓
+hermes.ts
+  ↓
+gemini.ts
+  ↓
+Slack approval
+  ↓
+gmail.ts
+  ↓
+storage.ts
+```
 
 ---
 
 ## Capability Profile
 
-The user's ATS-friendly resume is not the source of truth.
-
-The source of truth is a structured capability profile.
-
-The ATS-friendly resume is one generated representation of that profile.
-
-Minimum conceptual structure:
-
-```text
-capability_profile
-├── identity
-├── positioning
-├── roles
-├── skills
-├── technologies
-├── industries
-├── experience
-├── achievements
-├── quantified_results
-├── case_studies
-├── products
-├── offers
-├── evidence
-└── constraints
-```
-
-The capability profile is used for:
-
-- ATS resume generation
-- opportunity matching
-- outbound personalization
-- proof selection
-- case-study selection
-- brand memory
-- conversion scoring
-
-Never invent experience, results, skills, customers, credentials, or case studies.
-
-Every material claim must be traceable to evidence.
-
----
-
-## Domain Model
-
-Keep these concepts separate.
-
-### Signal
-
-Something observed externally.
+Use one structured JSON file.
 
 Example:
-
-```text
-Acme posted a Senior Growth Engineer role 14 hours ago.
-```
-
-### Opportunity
-
-The commercial interpretation of the signal.
-
-Example:
-
-```text
-Acme likely has an outbound systems bottleneck and active budget.
-```
-
-### Action
-
-What Odyva recommends doing.
-
-Example:
-
-```text
-Send the founder case study X with message Y.
-```
-
-Do not collapse signal, opportunity, and action into one object.
-
----
-
-## Architectural Rules
-
-1. Never place business logic directly inside route handlers.
-
-2. Never call Gemini directly from domain modules.
-
-3. All model calls go through the shared AI provider layer.
-
-4. All external applications go through connectors.
-
-5. Hermes calls domain tools, not vendor-specific APIs.
-
-6. Every external write must be idempotent.
-
-7. Outbound communication requires explicit human approval unless a future product policy explicitly changes this.
-
-8. Workflow state must be persistable and resumable.
-
-9. All external input must be schema-validated.
-
-10. Postgres is the authoritative system of record.
-
-11. Queues contain work, not business truth.
-
-12. AI output must never silently overwrite verified structured data.
-
-13. Every score should retain the evidence used to produce it.
-
-14. Every irreversible action must be auditable.
-
-15. Every task must include verification before it is considered complete.
-
-16. Prefer explicit contracts over implicit behavior.
-
-17. Prefer deterministic logic before probabilistic reasoning.
-
-18. Prefer vertical slices over broad repo rewrites.
-
-19. Do not refactor unrelated areas while completing a scoped task.
-
-20. Do not redesign working systems unless the task explicitly requires it.
-
----
-
-## Execution Hierarchy
-
-Use integrations in this order:
-
-```text
-Structured API
-    >
-MCP protocol
-    >
-Deterministic script
-    >
-Computer use
-```
-
-Computer use is the final fallback, not the default integration strategy.
-
-Do not build fragile mouse-clicking automation where stable APIs exist.
-
----
-
-## Human Governance
-
-Odyva automates work, not accountability.
-
-Good candidates for automation:
-
-- discovering companies
-- parsing job descriptions
-- matching requirements
-- researching company context
-- ranking opportunities
-- drafting messaging
-- updating internal records
-
-External reputation-bearing actions require approval.
-
-Examples:
-
-- send email
-- publish social content
-- modify customer-facing CRM state
-- contact a buyer
-- submit a form on behalf of the user
-
-Slack is the primary human approval surface for the current product.
-
----
-
-## Opportunity Scoring
-
-Do not ask a model for one ungrounded score such as:
-
-```text
-"Give this lead a score from 1 to 100."
-```
-
-Use structured factors.
-
-Current conceptual score:
-
-```text
-opportunity score
-=
-intent
-× capability fit
-× evidence strength
-× urgency
-× buyer relevance
-× reachability
-× historical conversion prior
-```
-
-Implementation may use weighted normalization rather than literal multiplication.
-
-The important rule is that the score must be decomposable.
-
-A match should be explainable as:
 
 ```json
 {
-  "overall_score": 91,
-  "intent": 96,
-  "capability_fit": 94,
-  "evidence_strength": 88,
-  "urgency": 93,
-  "buyer_relevance": 89,
-  "reachability": 82
+  "name": "candidate",
+  "positioning": "AI creative director and GTM operator",
+  "skills": [
+    "AI automation",
+    "GTM systems",
+    "content",
+    "TypeScript",
+    "workflow design"
+  ],
+  "experience": [],
+  "results": [],
+  "case_studies": [],
+  "constraints": []
 }
 ```
 
-Gemini may extract evidence, classify context, or explain the result.
+This file is the source of truth for matching.
 
-Gemini must not invent unsupported evidence.
+Do not rely on repeatedly parsing a PDF during the demo.
+
+The ATS-friendly resume can be generated from the same profile later.
+
+Never invent capabilities, results, or proof.
 
 ---
 
-## 24/7 Discovery
+## Opportunity Model
 
-Odyva should eventually run continuously.
+Keep it simple.
 
-Target event flow:
-
-```text
-scheduler
-  ↓
-source discovery
-  ↓
-queue
-  ↓
-ingestion
-  ↓
-normalization
-  ↓
-signal discovered
-  ↓
-opportunity matching
-  ↓
-opportunity scored
-  ↓
-Hermes
-  ↓
-Gemini
-  ↓
-asset generated
-  ↓
-Slack approval
-  ↓
-approved action
-  ↓
-execution
-  ↓
-outcome
-  ↓
-memory update
+```ts
+type Opportunity = {
+  company: string
+  role: string
+  sourceUrl: string
+  postedAt?: string
+  requirements: string[]
+  painPoints: string[]
+}
 ```
 
-Avoid one giant synchronous function for the entire loop.
+Match output:
 
-Each stage should be retryable independently.
-
----
-
-## Source Integrations
-
-Initial live intent sources:
-
-- Greenhouse
-- Lever
-- company careers pages
-
-Future sources may include:
-
-- Ashby
-- CRM signals
-- social intent
-- funding events
-- product usage signals
-- website intent
-- email engagement
-- customer support signals
-
-New sources must normalize into the same internal signal contract.
-
-Vendor-specific schemas must not leak across the domain layer.
+```ts
+type OpportunityMatch = {
+  score: number
+  capabilityFit: number
+  intent: number
+  evidence: number
+  urgency: number
+  reasons: string[]
+}
+```
 
 ---
 
-## Development Environment Safety
+## Scoring
 
-Development must default to dry-run behavior.
+Use deterministic scoring.
 
-Recommended default:
+Suggested MVP formula:
+
+```text
+score =
+  capabilityFit * 0.40 +
+  intent        * 0.30 +
+  evidence      * 0.20 +
+  urgency       * 0.10
+```
+
+Gemini may help classify or extract the inputs.
+
+Gemini should not simply invent the final score.
+
+A result should be explainable.
+
+Example:
+
+```text
+92% match
+
+why:
+- role requires outbound automation
+- candidate has matching workflow experience
+- company is actively hiring now
+- relevant technical stack overlap exists
+```
+
+---
+
+## Hermes Tools
+
+Keep Hermes tools minimal.
+
+Recommended:
+
+```text
+getLiveJobs()
+matchOpportunity()
+generateOutreach()
+requestApproval()
+sendApprovedEmail()
+saveResult()
+```
+
+Hermes should not directly contain raw Gmail, Slack, or Greenhouse SDK logic.
+
+---
+
+## Slack Approval
+
+The Slack card should show:
+
+- company
+- role
+- match score
+- why it matches
+- generated email
+- approve
+- reject
+
+Do not overdesign the UI.
+
+The demo needs one obvious approval moment.
+
+---
+
+## Gmail
+
+Default to safe execution while building.
+
+Recommended:
+
+```env
+EMAIL_MODE=dry_run
+```
+
+Modes:
+
+```text
+dry_run
+draft
+live
+```
+
+Only enable `live` after the complete flow works.
+
+---
+
+## Storage
+
+For the hackathon, storage can be simple.
+
+Allowed:
+
+- JSON file
+- SQLite
+- existing Postgres
+
+Do not introduce a new database only for architectural purity.
+
+Store enough to show:
+
+```text
+company
+role
+score
+status
+approved/rejected
+sent_at
+```
+
+---
+
+## 24/7 Claim
+
+The architecture should support continuous execution conceptually.
+
+For the demo, a simple interval or scheduled function is enough.
+
+Example:
+
+```text
+run search every 15 minutes
+```
+
+Do not build full production scheduling infrastructure unless already available.
+
+---
+
+## Development Safety
+
+Use safe defaults:
 
 ```env
 APP_ENV=development
-EXECUTION_MODE=dry_run
+EMAIL_MODE=dry_run
 ```
 
-Expected behavior:
+Never let an AI coding agent accidentally send live outreach during implementation.
+
+---
+
+## AI Coding Rules
+
+Before changing code:
+
+1. read this file
+2. read `README.md`
+3. inspect the actual repository
+4. read `docs/CURRENT_STATE.md`
+5. identify the smallest missing part of the demo loop
+6. implement only that part
+7. test it
+8. continue to the next missing part
+
+Do not perform broad refactors while the demo loop is incomplete.
+
+Do not create architecture that is not required for the demo.
+
+Do not replace working code because a cleaner design exists.
+
+---
+
+## Build Order
+
+Use this order:
 
 ```text
-Gmail       → log / draft only
-Slack       → development channel
-CRM         → sandbox or fixture
-Greenhouse  → real read or fixture
-Lever       → real read or fixture
-Gemini      → real or mocked depending on task
-```
-
-Production execution should require:
-
-```env
-APP_ENV=production
-EXECUTION_MODE=live
-```
-
-plus an approved action.
-
-Never assume a development environment is safe to perform live external writes.
-
----
-
-## AI Development Workflow
-
-This repository is being built heavily with AI coding agents.
-
-Before starting implementation, read:
-
-1. `AGENTS.md`
-2. `README.md`
-3. `docs/VISION.md` if present
-4. `docs/CURRENT_STATE.md` if present
-5. `docs/TARGET_STATE.md` if present
-6. the active task file
-
-Then:
-
-```text
-understand current state
-  ↓
-identify smallest complete vertical slice
-  ↓
-write implementation plan
-  ↓
-modify only relevant files
-  ↓
-run tests / checks
-  ↓
-fix failures
-  ↓
-document material architectural change
-  ↓
-update current state
-```
-
-Do not infer that the target architecture already exists.
-
-The repository may contain legacy or prototype code.
-
-Preserve working behavior unless migration is explicitly part of the task.
-
----
-
-## Task Discipline
-
-Each meaningful task should define:
-
-- objective
-- current state
-- inputs
-- outputs
-- constraints
-- acceptance criteria
-- files likely involved
-- tests required
-- known non-goals
-
-Tasks should be small enough to complete and verify in one development session where possible.
-
-Bad task:
-
-```text
-build Odyva
-```
-
-Good task:
-
-```text
-normalize Greenhouse job data into OpportunitySignal v1
-```
-
----
-
-## Testing Standard
-
-Minimum expectations:
-
-### Unit tests
-
-For:
-
-- scoring
-- parsing
-- validation
-- normalization
-- deterministic transforms
-- policy checks
-
-### Contract tests
-
-For:
-
-- connectors
-- provider interfaces
-- event schemas
-- public tool interfaces
-
-### Integration tests
-
-For:
-
-- database flows
-- queue flows
-- Gemini provider
-- Slack approval lifecycle
-- execution lifecycle
-
-### End-to-end tests
-
-For the complete vertical path:
-
-```text
-signal
-→ match
-→ score
-→ generate
-→ approve
-→ execute
-→ record outcome
-```
-
-### Failure tests
-
-Cover:
-
-- duplicate events
-- provider timeout
-- malformed AI output
-- queue retry
-- duplicate approval
-- duplicate send
-- partial workflow failure
-- database reconnect
-- invalid credentials
-- stale execution state
-
----
-
-## Observability
-
-Every production workflow should be traceable.
-
-Where possible, record:
-
-- workflow id
-- signal id
-- opportunity id
-- action id
-- approval id
-- execution id
-- model provider
-- model name
-- prompt version
-- connector
-- external request id
-- latency
-- retry count
-- final status
-
-Logs must never expose raw secrets.
-
-Sensitive tokens must remain in the appropriate secrets system.
-
----
-
-## Memory
-
-Memory should improve future decisions without corrupting verified facts.
-
-Keep different memory classes distinguishable:
-
-- brand memory
-- company memory
-- interaction memory
-- campaign memory
-- outcome memory
-
-Derived memory should retain provenance.
-
-An observed conversion outcome is stronger evidence than an AI inference.
-
----
-
-## Repository Boundaries
-
-Target conceptual boundaries:
-
-```text
-apps/
-deployable runtimes
-
-packages/
-domain and reusable capabilities
-
-connectors/
-external systems
-
-workflows/
-multi-step business processes
-
-infra/
-AWS infrastructure
-
-evals/
-AI quality and regression
-
-tasks/
-AI-readable implementation tasks
-
-docs/
-persistent architectural context
-```
-
-Do not move code purely for aesthetic reasons.
-
-Migrate toward these boundaries as features are touched.
-
----
-
-## Current Build Priority
-
-The preferred implementation order is:
-
-1. repo control layer
-2. structured capability profile
-3. live intent ingestion
-4. signal / opportunity / action domain separation
-5. opportunity matching
-6. Gemini provider abstraction
-7. Hermes runtime and domain tools
+1. inspect repo
+2. capability profile
+3. Greenhouse fetch
+4. normalization
+5. match scoring
+6. Gemini generation
+7. Hermes orchestration
 8. Slack approval
-9. Gmail / records execution
-10. persistent outcomes and memory
-11. 24/7 AWS runtime
-12. evals, observability, failure recovery
+9. Gmail dry-run / send
+10. result storage
+11. end-to-end test
+12. demo polish
+```
 
-The first major product milestone is one complete working loop, not a perfectly organized repository.
+---
+
+## Demo Success Condition
+
+The hackathon MVP is successful when one real opportunity goes through this full flow:
+
+```text
+job discovered
+→ matched
+→ scored
+→ explained
+→ outreach generated
+→ Slack approval shown
+→ approved
+→ Gmail executed
+→ result saved
+```
+
+Everything else is secondary.
 
 ---
 
 ## Definition of Done
 
-A task is not done because code was generated.
+A feature is done when:
 
-It is done when:
+- it works in the demo flow
+- its output is visible
+- it has basic error handling
+- it does not break the next step
+- it can be tested quickly
+- it does not require production-grade infrastructure
 
-- implementation is complete
-- types pass
-- tests pass
-- behavior is verified
-- external actions are safe
-- failure states are considered
-- relevant documentation is updated
-- known limitations are recorded
-- no unrelated system behavior was broken
-# Odyva GTM Agent Instructions
+The primary rule:
 
-## Hackathon scope
-
-Odyva GTM is a 3–4 hour hackathon MVP.
-
-Build only one complete, visible loop:
-
-~~~text
-Greenhouse → fetch → normalize → capability match → Hermes → Gemini → score + outreach → Slack approval → Gmail send/dry run → save result
-~~~
-
-Optimize for a working demo, clear reasoning, and safe execution. Do not build the production target architecture during this phase.
-
-## Repository scope
-
-Use small TypeScript modules:
-
-- src/index.ts wires the flow.
-- src/greenhouse.ts fetches and normalizes Greenhouse jobs.
-- src/matcher.ts compares a job with the verified capability profile.
-- src/hermes.ts coordinates the recommendation.
-- src/gemini.ts performs bounded reasoning and outreach generation.
-- src/slack.ts handles the approval surface.
-- src/gmail.ts sends or dry-runs approved outreach.
-- src/storage.ts saves the result.
-- data/capability_profile.json is the source of truth.
-- data/results.json is MVP memory.
-- tests/flow.test.ts verifies the complete path.
-
-Avoid abstractions that do not help complete the demo.
-
-## Product rules
-
-The capability profile is authoritative. Never invent experience, skills, results, customers, credentials, or evidence. Important match reasons and outreach claims must come from the profile or fetched job.
-
-Keep these concepts understandable:
-
-- signal: what the job posting says.
-- opportunity: why the posting may be commercially relevant.
-- action: what outreach Odyva recommends.
-
-Use an explainable weighted score:
-
-~~~text
-score = capabilityFit × 0.4 + intent × 0.3 + evidence × 0.2 + urgency × 0.1
-~~~
-
-Gemini may interpret evidence and generate wording. It must not create unsupported evidence or send email directly.
-
-External communication requires explicit Slack approval.
-
-## Safety defaults
-
-Development defaults to:
-
-~~~env
-APP_ENV=development
-EXECUTION_MODE=dry_run
-~~~
-
-Gmail should draft, log, or dry-run unless live sending is explicitly enabled and the action is approved in Slack. Greenhouse is read-only.
-
-AWS may appear in documentation only as the eventual host for the runtime. JSON is sufficient for MVP storage and memory.
-
-## Explicit non-goals
-
-Do not add ECS microservices, SQS, EventBridge, dead-letter queues, multi-tenancy, generic connector frameworks, multiple workers, event sourcing, distributed memory, production-grade retries, CRM abstractions, broad observability, or full evaluation infrastructure.
-
-## Working method
-
-Before meaningful implementation:
-
-1. Read AGENTS.md and README.md.
-2. Read docs/CURRENT_STATE.md and docs/ARCHITECTURE.md.
-3. Inspect only the relevant implementation.
-4. Build the smallest complete vertical slice.
-5. Run the relevant tests or checks.
-6. Update documentation only when behavior or scope changes.
-
-Prefer one complete thin path over partially building many components. Do not perform unrelated cleanup or refactoring.
-
-## Definition of done
-
-The MVP is done when it can find a recent Greenhouse job, normalize it, match it against capability_profile.json, produce an explainable score, generate grounded outreach through Gemini, show it in Slack, require approval, send or dry-run through Gmail, and save the result.
+```text
+working demo > perfect architecture
+```
