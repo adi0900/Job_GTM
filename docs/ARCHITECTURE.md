@@ -1,60 +1,521 @@
-# MVP Architecture
+# ARCHITECTURE.md
 
-The MVP is a single thin TypeScript flow with small modules and local JSON storage.
+## goal
 
-~~~text
+the hackathon architecture should be:
+
+```text
+small
+understandable
+reliable
+demoable
+```
+
+it should prove the complete multi-app flow without production overengineering.
+
+---
+
+## system flow
+
+```text
 Greenhouse
    ↓
-simple fetcher
+greenhouse.ts
    ↓
-normalize job
+NormalizedJob
    ↓
-match against capability_profile.json
+matcher.ts
+   ↓
+OpportunityMatch
    ↓
 Hermes
    ↓
 Gemini API
    ↓
-score + generate outreach
-   ↓
 Slack approval
    ↓
-Gmail send / dry run
+Gmail
    ↓
-save result
-~~~
+Google Sheets
+```
 
-## Modules
+---
 
-- greenhouse.ts reads a recent job and returns a normalized job object. It is read-only and should be easy to replace with a fixture.
-- matcher.ts compares the job with data/capability_profile.json and returns score factors, evidence, and plain-language reasons.
-- hermes.ts coordinates the workflow and prepares the recommendation. It is a small orchestration layer, not a general agent platform.
-- gemini.ts receives structured job, profile, and match context and returns why the company is a fit, who to contact when available, and grounded outreach.
-- slack.ts displays the recommendation and collects explicit approval.
-- gmail.ts sends approved outreach when live execution is enabled; otherwise it logs or drafts.
-- storage.ts saves the final result in data/results.json.
+## external app requirement
 
-Gemini must not invent evidence or send email. Hermes must not contain vendor-specific request details.
+the system must visibly use at least three external apps.
 
-## Scoring
+odyva uses four:
 
-~~~text
-score = capabilityFit × 0.4 + intent × 0.3 + evidence × 0.2 + urgency × 0.1
-~~~
+```text
+1. greenhouse
+2. slack
+3. gmail
+4. google sheets
+```
 
-Keep the component values and reasons in the result so the recommendation is explainable.
+gemini is the model provider.
 
-## Runtime and safety
+hermes is the runtime operator.
 
-Local development is the default. AWS may host the eventual runtime, but no distributed AWS services are required for the MVP.
+---
 
-~~~env
+## recommended repo shape
+
+```text
+odyva-gtm/
+├── AGENTS.md
+├── README.md
+├── docs/
+│   ├── VISION.md
+│   ├── ARCHITECTURE.md
+│   ├── CURRENT_STATE.md
+│   └── DEMO_FLOW.md
+├── src/
+│   ├── index.ts
+│   ├── greenhouse.ts
+│   ├── matcher.ts
+│   ├── hermes.ts
+│   ├── gemini.ts
+│   ├── slack.ts
+│   ├── gmail.ts
+│   ├── sheets.ts
+│   └── storage.ts
+├── data/
+│   ├── capability_profile.json
+│   └── results.json
+├── tests/
+│   └── flow.test.ts
+├── .env.example
+├── package.json
+└── tsconfig.json
+```
+
+do not split this into microservices during the hackathon.
+
+---
+
+## module contracts
+
+### `src/index.ts`
+
+role:
+
+```text
+entry point
+```
+
+responsibilities:
+
+```text
+load configuration
+run one search cycle
+coordinate the demo
+surface errors
+```
+
+---
+
+### `src/greenhouse.ts`
+
+role:
+
+```text
+live intent source
+```
+
+responsibilities:
+
+```text
+fetch real jobs
+normalize raw response
+return predictable objects
+```
+
+suggested type:
+
+```ts
+type NormalizedJob = {
+  id: string
+  company: string
+  role: string
+  sourceUrl: string
+  description: string
+  postedAt?: string
+}
+```
+
+---
+
+### `src/matcher.ts`
+
+role:
+
+```text
+capability match + deterministic scoring
+```
+
+responsibilities:
+
+```text
+extract relevant requirements
+compare them to capability profile
+calculate score components
+return reasons
+```
+
+suggested output:
+
+```ts
+type OpportunityMatch = {
+  score: number
+  capabilityFit: number
+  intent: number
+  evidence: number
+  urgency: number
+  reasons: string[]
+}
+```
+
+recommended scoring:
+
+```text
+score =
+  capabilityFit * 0.40 +
+  intent        * 0.30 +
+  evidence      * 0.20 +
+  urgency       * 0.10
+```
+
+---
+
+### `src/hermes.ts`
+
+role:
+
+```text
+runtime operator
+```
+
+recommended tools:
+
+```text
+getLiveJobs()
+matchOpportunity()
+generateOutreach()
+requestApproval()
+sendApprovedEmail()
+recordResult()
+```
+
+hermes should not directly contain raw third-party sdk code.
+
+---
+
+### `src/gemini.ts`
+
+role:
+
+```text
+primary ai provider
+```
+
+responsibilities:
+
+```text
+job pain extraction
+requirement extraction
+match explanation
+outbound generation
+```
+
+all gemini calls should stay here or behind one small provider abstraction.
+
+---
+
+### `src/slack.ts`
+
+role:
+
+```text
+human approval
+```
+
+the card should show:
+
+```text
+company
+role
+match score
+reasons
+generated email
+```
+
+actions:
+
+```text
+approve + send
+reject
+```
+
+reject must stop gmail execution.
+
+---
+
+### `src/gmail.ts`
+
+role:
+
+```text
+outbound action
+```
+
+modes:
+
+```text
+dry_run
+draft
+live
+```
+
+default:
+
+```env
+EMAIL_MODE=dry_run
+```
+
+duplicate approval should not produce duplicate email execution.
+
+---
+
+### `src/sheets.ts`
+
+role:
+
+```text
+external persistent record
+```
+
+minimum row:
+
+```text
+timestamp
+company
+role
+source_url
+match_score
+decision
+email_status
+```
+
+a sheet write failure must be surfaced clearly.
+
+---
+
+### `src/storage.ts`
+
+role:
+
+```text
+local/internal demo state
+```
+
+allowed:
+
+```text
+json
+sqlite
+existing postgres
+```
+
+do not introduce a new database unless already present.
+
+---
+
+## capability profile
+
+file:
+
+```text
+data/capability_profile.json
+```
+
+suggested structure:
+
+```json
+{
+  "name": "candidate",
+  "positioning": "",
+  "skills": [],
+  "technologies": [],
+  "experience": [],
+  "results": [],
+  "case_studies": [],
+  "constraints": []
+}
+```
+
+this is the matching source of truth.
+
+---
+
+## reliability architecture
+
+the architecture must support these testable guarantees.
+
+### approval guarantee
+
+```text
+no approval
+→ no gmail execution
+```
+
+### reject guarantee
+
+```text
+reject
+→ zero sends
+```
+
+### duplicate guarantee
+
+```text
+same approval twice
+→ one send maximum
+```
+
+### model failure guarantee
+
+```text
+gemini failure
+→ no external action
+```
+
+### gmail failure guarantee
+
+```text
+gmail failure
+→ visible failure
+→ no false success
+```
+
+### google sheets failure guarantee
+
+```text
+sheet failure
+→ visible failure
+→ no fake completed state
+```
+
+---
+
+## idempotency for the mvp
+
+the hackathon does not need a distributed idempotency service.
+
+a simple action id is enough.
+
+example:
+
+```text
+action_id = hash(company + role + generated_email)
+```
+
+before executing gmail:
+
+```text
+if action_id already executed:
+    return previous result
+```
+
+the implementation may be simpler if the current repo already has a better mechanism.
+
+---
+
+## local-first architecture
+
+recommended sequence:
+
+```text
+build locally
+→ test full loop
+→ optionally deploy
+```
+
+do not delay the demo for aws infrastructure.
+
+---
+
+## aws
+
+aws is the intended hosting layer.
+
+for the hackathon, acceptable architecture is:
+
+```text
+one runtime service
+```
+
+or even:
+
+```text
+local demo
+```
+
+if deployment would consume time better spent on reliability.
+
+---
+
+## safe defaults
+
+```env
 APP_ENV=development
-EXECUTION_MODE=dry_run
-~~~
+EMAIL_MODE=dry_run
+```
 
-Only an explicitly approved action may proceed to live Gmail sending.
+never:
 
-## Non-goals
+```text
+commit secrets
+log secrets
+send without approval
+silently swallow failure
+invent capability proof
+```
 
-Do not introduce microservices, queues, event sourcing, generic connector frameworks, multi-tenancy, elaborate memory, production retry systems, broad CRM abstractions, or a full observability/evaluation platform.
+---
+
+## architecture non-goals
+
+not required:
+
+```text
+sqs
+eventbridge
+microservices
+dead-letter queues
+distributed tracing
+multi-tenancy
+generic plugin framework
+crm abstraction
+memory graph
+multiple model providers
+```
+
+---
+
+## end-to-end proof
+
+the architecture is successful when this works:
+
+```text
+real greenhouse job
+→ normalized job
+→ match score
+→ gemini explanation
+→ slack approval
+→ gmail execution
+→ google sheets row
+```
+
+and when the failure paths behave correctly.
