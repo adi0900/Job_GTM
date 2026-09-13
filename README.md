@@ -608,7 +608,7 @@ Do not claim tests that were not actually run.
 
 ## 05. Demo Video
 
-**Demo video:** TODO_DEMO_VIDEO_URL
+**Demo video:** [Watch the Odyva GTM demo](https://youtu.be/l7xBSb0yEX4)
 
 Requirements:
 
