@@ -2,11 +2,37 @@
 
 > 24/7 AI-powered GTM search that finds live operational intent, matches it against verified capabilities, prepares the highest-probability conversion action, asks for human approval, executes it, and records the outcome.
 
+## GitHub Repository
+
+This project is hosted on GitHub: [adi0900/Job_GTM](https://github.com/adi0900/Job_GTM).
+
 ## Watch the Demo
 
 [![▶ Watch the Odyva GTM demo](https://img.youtube.com/vi/l7xBSb0yEX4/hqdefault.jpg)](https://youtu.be/l7xBSb0yEX4?autoplay=1)
 
 [Open the demo on YouTube](https://youtu.be/l7xBSb0yEX4?autoplay=1)
+
+---
+
+## Real Integration Proof
+
+The project is hosted in the [Job_GTM GitHub repository](https://github.com/adi0900/Job_GTM). The evidence below is ordered from AWS hosting, to Google services, to the live source signal and recorded result.
+
+### 1. AWS-hosted runtime
+
+![AWS EC2 running the Odyva runtime](docs/proof/01-aws-ec2.png)
+
+### 2. Google Cloud integrations
+
+![Google Cloud APIs enabled for the Odyva project](docs/proof/02-google-cloud.png)
+
+### 3. Live Greenhouse opportunity
+
+![Live Greenhouse opportunity used by the workflow](docs/proof/03-greenhouse.png)
+
+### 4. Google Sheets result
+
+![Recorded Odyva workflow result in Google Sheets](docs/proof/04-google-sheets.png)
 
 ---
 
