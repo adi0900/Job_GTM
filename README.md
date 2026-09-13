@@ -17,8 +17,9 @@ Greenhouse
 → capability matching
 → opportunity scoring
 → direct Gemini reasoning
+→ Gmail draft preparation
 → Slack approval
-→ Gmail execution
+→ approved Gmail send
 → Google Sheets record
 ```
 
@@ -193,7 +194,7 @@ Email:
 [ Reject ]
 ```
 
-Only approved actions continue to Gmail.
+Only approved actions continue to Gmail sending; draft preparation does not send an email.
 
 ### Result
 
@@ -242,15 +243,15 @@ Reject
 
 **Purpose:** approved outbound execution.
 
-After explicit approval, Odyva can:
+The runtime prepares a real Gmail draft before approval. Only an explicit Slack approval may send it:
 
 ```text
-dry-run
-create draft
-send live email
+prepare draft
+Approve + Send → drafts.send → message id
+Reject → no send
 ```
 
-depending on configuration.
+`GMAIL_MODE=live` and `EMAIL_MODE=live` enable the approved send path. The application still refuses to send before approval, and the existing `scripts/gmail-draft.ts` remains available for draft-only operations.
 
 ### 4. Google Sheets
 
@@ -366,6 +367,7 @@ GOOGLE_SHEETS_SPREADSHEET_ID=
 GOOGLE_SHEETS_CLIENT_EMAIL=
 GOOGLE_SHEETS_PRIVATE_KEY=
 
+GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
 ```
 
@@ -390,13 +392,21 @@ SLACK_CHANNEL_ID=
 
 ### 5. Configure Gmail
 
-During development:
+Safe development defaults:
 
 ```env
+GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
 ```
 
-Supported modes may include:
+For the AWS runtime, use the approval-gated live path:
+
+```env
+GMAIL_MODE=live
+EMAIL_MODE=live
+```
+
+Supported modes are:
 
 ```text
 dry_run
@@ -404,7 +414,7 @@ draft
 live
 ```
 
-Only enable live sending after the full approval flow has been verified.
+In live mode, Odyva creates a real draft first. The Slack **Approve + Send** action sends that existing draft through Gmail `drafts.send`; **Reject** never sends. Live mode must only be enabled where the Slack approval gate is active.
 
 ### 6. Configure Google Sheets
 
@@ -472,8 +482,9 @@ Flow:
 Greenhouse
 → match
 → Gemini
+→ Gmail draft
 → Slack approval
-→ Gmail
+→ Gmail drafts.send
 → Google Sheets
 ```
 
@@ -500,7 +511,7 @@ opportunity
 Expected:
 
 ```text
-zero Gmail sends
+zero Gmail sends (a draft may already exist, but it is never sent)
 decision recorded
 ```
 
@@ -515,7 +526,7 @@ same action approved twice
 Expected:
 
 ```text
-only one Gmail action
+one draft and at most one Gmail send
 ```
 
 This prevents duplicate outbound caused by repeated interactions or retries.
@@ -683,6 +694,9 @@ odyva-gtm/
 │   └── results.json
 ├── tests/
 │   └── flow.test.ts
+├── scripts/
+│   ├── gmail-draft.ts
+│   └── gmail-send.ts
 ├── .env.example
 ├── package.json
 └── tsconfig.json
@@ -717,6 +731,8 @@ Judge test flow:
 
 The most important rule is: judges should test through Slack, not by receiving your AWS/GCP credentials. For the safest possible setup, use a dedicated test Gmail account, a dedicated sheet, and a dedicated Slack channel, then revoke temporary tokens immediately after judging.
 
+Judge mode remains draft-only. The separate AWS runtime may use live Gmail execution, but only through the explicit Slack approval gate described above.
+
 ## Current Hackathon Runtime
 
 Hermes Agent v0.21.2 was installed and evaluated on AWS, but its native Gemini provider returned an authentication-header error despite the same credential succeeding against Google's API directly. To keep the hackathon execution path reliable, the final AWS-hosted agent calls Gemini directly.
@@ -726,7 +742,7 @@ External apps:
 ```text
 Greenhouse
 Slack Socket Mode
-Gmail (draft mode)
+Gmail (approval-gated live send)
 Google Sheets
 ```
 
@@ -750,6 +766,7 @@ real Greenhouse job
 → direct Gemini API
 → Slack Socket Mode approval
 → Gmail draft
+→ approved Gmail drafts.send
 → Google Sheets row
 ```
 
@@ -757,6 +774,7 @@ Development defaults should remain safe.
 
 ```env
 APP_ENV=development
+GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
 ```
 

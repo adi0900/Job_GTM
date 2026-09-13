@@ -209,21 +209,21 @@ show:
 approved
 ```
 
-then:
+the workflow has already prepared the real Gmail draft. After approval, show:
 
 ```text
-gmail action executed
+Gmail drafts.send executed
+real message id captured
 ```
 
-acceptable modes:
+final AWS runtime modes:
 
 ```text
-dry_run
-draft
-live
+GMAIL_MODE=live
+EMAIL_MODE=live
 ```
 
-live is not required if dry-run or draft is clearly labeled.
+The application sends only after the explicit Slack approval. Reject never sends.
 
 ---
 

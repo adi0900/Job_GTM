@@ -281,10 +281,11 @@ live
 default:
 
 ```env
+GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
 ```
 
-duplicate approval should not produce duplicate email execution.
+The approved live path creates a draft before the Slack decision, then uses Gmail `drafts.send` only after an explicit **Approve + Send** action. Reject never sends, and duplicate approval must not produce duplicate email execution.
 
 ---
 
@@ -470,6 +471,7 @@ if deployment would consume time better spent on reliability.
 
 ```env
 APP_ENV=development
+GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
 ```
 

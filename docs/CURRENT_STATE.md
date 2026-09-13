@@ -43,6 +43,8 @@ The repository contains:
 - src/gmail.ts
 - src/sheets.ts
 - src/storage.ts
+- scripts/gmail-draft.ts
+- scripts/gmail-send.ts
 - data/capability_profile.json
 - data/results.json
 - tests/flow.test.ts
@@ -60,17 +62,17 @@ The capability profile now contains only information supplied in the project doc
 - The matcher calculates capability fit, intent, evidence, urgency, overall score, matched capabilities, and reasons deterministically.
 - Gemini has a live REST adapter with structured JSON response validation and a grounded local mock mode.
 - Slack has a live chat.postMessage adapter, Block Kit approval card, and interaction payload parser.
-- Gmail supports dry_run, draft, and live modes with a process-level action idempotency guard.
+- Gmail supports dry_run, draft, and live modes with approval-gated draft creation, Gmail `drafts.send`, and process-level idempotency guards.
 - Google Sheets has a live values.append adapter and a local mock mode.
 - JSON storage can load and upsert flow results.
-- Hermes coordinates the flow and blocks Gmail until approval.
+- Hermes coordinates the flow, prepares a Gmail draft before approval, and blocks Gmail sending until approval.
 - The complete local-safe flow was run against live Greenhouse data with mock Gemini, mock Slack, Gmail dry-run, and mock Sheets.
 
 ## Partial functionality
 
 - Slack approval cards can be posted, and block action payloads can be parsed, but a public callback server is not yet wired into the demo command.
 - Gemini live calls are implemented but have not been verified because no API key is configured.
-- Gmail live/draft calls are implemented but have not been verified because no Google OAuth credentials are configured.
+- Gmail OAuth and real draft creation are verified; the approval-gated live send path is implemented and still requires the single explicit send test.
 - Google Sheets live append is implemented but has not been verified because no spreadsheet or OAuth credentials are configured.
 - Local persistence is implemented, but the live demo run used a temporary result path and did not write a repository result.
 
@@ -78,7 +80,7 @@ The capability profile now contains only information supplied in the project doc
 
 - Slack interaction callback delivery into a running flow
 - configured Gemini API credentials and live verification
-- configured Gmail OAuth and live or draft verification
+- approval-gated Gmail live send verification
 - configured Google Sheets OAuth and append verification
 - a saved real fallback job for recording
 - README setup and reliability sections updated with final command evidence
@@ -94,7 +96,9 @@ live Greenhouse job
 → grounded mock or live Gemini draft
 → Slack mock card or live approval card
 → environment-supplied approval
-→ Gmail dry-run, draft, or live action
+→ Gmail draft
+→ explicit approval
+→ Gmail `drafts.send`
 → Sheets mock or live row
 → local JSON result
 ~~~
@@ -106,7 +110,7 @@ The local-safe path is verified. The live multi-app path is waiting on credentia
 ~~~text
 greenhouse: live public fetch verified against GuidePoint Security; 56 jobs returned
 slack: mock card path and block action parser tested; live post not authenticated
-gmail: dry_run and idempotency tested; draft/live not authenticated
+gmail: OAuth and real draft creation verified; approval-gated `drafts.send` path added; live send proof pending
 google sheets: mock append and failure handling tested; live append not authenticated
 gemini: mock generation and validation tested; live provider not authenticated
 hermes: local orchestration and approval gate tested
@@ -116,7 +120,7 @@ hermes: local orchestration and approval gate tested
 
 ~~~text
 test command: npm test
-passing: 12
+passing: 15
 failing: 0
 syntax check: npm run check passed
 manual verification: live Greenhouse fetch plus complete local-safe approved dry-run
@@ -139,7 +143,7 @@ Reliability cases covered by tests:
 
 - No API keys, OAuth tokens, spreadsheet id, Slack bot token, or public Slack interaction URL are present in the repository.
 - Live Slack approval requires an externally reachable request URL for Block Kit interaction payloads.
-- Live Gmail, Google Sheets, and Gemini verification cannot proceed without credentials or explicit OAuth approval.
+- The remaining Gmail-specific verification is one explicit approved live send; no credentials are stored in the repository.
 
 ## Next step
 
