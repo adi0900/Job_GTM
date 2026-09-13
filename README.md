@@ -2,6 +2,12 @@
 
 > 24/7 AI-powered GTM search that finds live operational intent, matches it against verified capabilities, prepares the highest-probability conversion action, asks for human approval, executes it, and records the outcome.
 
+## Watch the Demo
+
+[![▶ Watch the Odyva GTM demo](https://img.youtube.com/vi/l7xBSb0yEX4/hqdefault.jpg)](https://youtu.be/l7xBSb0yEX4?autoplay=1)
+
+[Open the demo on YouTube](https://youtu.be/l7xBSb0yEX4?autoplay=1)
+
 ---
 
 ## 01. Project Overview
@@ -35,7 +41,11 @@ Odyva connects the entire workflow.
 
 ## Judge Test Invite
 
-Judges can test the public sandbox through Slack without receiving AWS, Google Cloud, or Slack admin credentials. Join `#odyva-judge-test`, upload a resume PDF, mention `@Odyva GTM`, review the matched opportunity, and choose **Approve + Draft**. The complete safety boundaries and test flow are documented in [Judge Safety Mode](#judge-safety-mode).
+Judges can test the public sandbox through Slack without receiving AWS, Google Cloud, or Slack admin credentials.
+
+[Join the Odyva GTM Slack test workspace](https://join.slack.com/t/motionvizworkspace/shared_invite/zt-49lnp3cwn-6g~jo9~Cbzb5U03mHOLALQ)
+
+After joining, open `#odyva-judge-test`, mention `@Odyva GTM`, and type any request—for example, `@Odyva GTM find a matching GTM opportunity`. You can also upload a resume PDF, review the matched opportunity, and choose **Approve + Draft**. The complete safety boundaries and test flow are documented in [Judge Safety Mode](#judge-safety-mode).
 
 It answers:
 
