@@ -614,6 +614,8 @@ Do not claim tests that were not actually run.
 
 **Demo video:** [Watch the Odyva GTM demo](https://youtu.be/l7xBSb0yEX4)
 
+[![Watch the Odyva GTM demo](https://img.youtube.com/vi/l7xBSb0yEX4/hqdefault.jpg)](https://youtu.be/l7xBSb0yEX4)
+
 Requirements:
 
 ```text
