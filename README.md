@@ -33,6 +33,10 @@ Instead of asking an AI model to perform disconnected tasks such as:
 
 Odyva connects the entire workflow.
 
+## Judge Test Invite
+
+Judges can test the public sandbox through Slack without receiving AWS, Google Cloud, or Slack admin credentials. Join `#odyva-judge-test`, upload a resume PDF, mention `@Odyva GTM`, review the matched opportunity, and choose **Approve + Draft**. The complete safety boundaries and test flow are documented in [Judge Safety Mode](#judge-safety-mode).
+
 It answers:
 
 ```text
