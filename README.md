@@ -697,3 +697,132 @@ the next search gets better.
 ```
 
 That is the product.
+# Odyva GTM
+
+Odyva GTM is a hackathon MVP for turning fresh hiring intent into an explainable, approval-gated GTM action.
+
+## The MVP loop
+
+~~~text
+Greenhouse
+   ↓
+simple fetcher
+   ↓
+normalize job
+   ↓
+match against capability_profile.json
+   ↓
+Hermes
+   ↓
+Gemini API
+   ↓
+score + generate outreach
+   ↓
+Slack approval
+   ↓
+Gmail send / dry run
+   ↓
+save result
+~~~
+
+The goal is one complete loop from real signal to approved action to recorded outcome.
+
+## Hackathon demo
+
+~~~text
+This job was posted 11 hours ago.
+  ↓
+Odyva found a 92% capability match.
+  ↓
+Here is exactly why.
+  ↓
+Here is the personalized outreach.
+  ↓
+Approve.
+  ↓
+Email sent or dry-run completed.
+~~~
+
+A recent job posting is treated as a live signal that a company may have an active problem and budget. The recommendation must be grounded in the job and the verified capability profile.
+
+## MVP architecture
+
+~~~text
+odyva-gtm/
+├── AGENTS.md
+├── README.md
+├── docs/
+│   ├── VISION.md
+│   ├── ARCHITECTURE.md
+│   ├── CURRENT_STATE.md
+│   └── DEMO_FLOW.md
+├── src/
+│   ├── index.ts
+│   ├── greenhouse.ts
+│   ├── matcher.ts
+│   ├── hermes.ts
+│   ├── gemini.ts
+│   ├── slack.ts
+│   ├── gmail.ts
+│   └── storage.ts
+├── data/
+│   ├── capability_profile.json
+│   └── results.json
+├── tests/
+│   └── flow.test.ts
+├── .env.example
+├── package.json
+└── tsconfig.json
+~~~
+
+## Component roles
+
+- Greenhouse reads recent job postings.
+- Matcher compares job requirements with verified capabilities.
+- Hermes coordinates the recommendation.
+- Gemini explains the fit and drafts grounded outreach.
+- Slack presents the recommendation and collects approval.
+- Gmail sends approved outreach or performs a dry run.
+- Storage saves the result in JSON.
+
+## Scoring
+
+Use a simple explainable score:
+
+~~~text
+score = capabilityFit × 0.4 + intent × 0.3 + evidence × 0.2 + urgency × 0.1
+~~~
+
+Keep the factor values and plain-language reasons in the result.
+
+## Safety
+
+Development defaults to:
+
+~~~env
+APP_ENV=development
+EXECUTION_MODE=dry_run
+~~~
+
+Greenhouse is read-only. Gmail should dry-run or create a draft until live sending is explicitly enabled. Slack approval is required before external outreach.
+
+## Out of scope
+
+This MVP does not need ECS microservices, SQS, EventBridge, dead-letter queues, multi-tenancy, generic connector abstractions, multiple workers, event sourcing, elaborate memory, production-grade retries, a CRM layer, distributed tracing, or full evaluation infrastructure.
+
+AWS may host the eventual runtime, but it is not a distributed architecture project for the hackathon. JSON is enough for MVP memory and result storage.
+
+## Build order
+
+1. Fetch a recent Greenhouse job.
+2. Normalize the job.
+3. Load capability_profile.json.
+4. Calculate and explain the match.
+5. Ask Gemini for the recommendation and outreach.
+6. Send the recommendation to Slack.
+7. Handle approval.
+8. Send or dry-run through Gmail.
+9. Save the result.
+10. Verify the complete flow with a test.
+
+Working demo over architecture. One complete loop over multiple services.

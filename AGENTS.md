@@ -736,3 +736,88 @@ It is done when:
 - relevant documentation is updated
 - known limitations are recorded
 - no unrelated system behavior was broken
+# Odyva GTM Agent Instructions
+
+## Hackathon scope
+
+Odyva GTM is a 3–4 hour hackathon MVP.
+
+Build only one complete, visible loop:
+
+~~~text
+Greenhouse → fetch → normalize → capability match → Hermes → Gemini → score + outreach → Slack approval → Gmail send/dry run → save result
+~~~
+
+Optimize for a working demo, clear reasoning, and safe execution. Do not build the production target architecture during this phase.
+
+## Repository scope
+
+Use small TypeScript modules:
+
+- src/index.ts wires the flow.
+- src/greenhouse.ts fetches and normalizes Greenhouse jobs.
+- src/matcher.ts compares a job with the verified capability profile.
+- src/hermes.ts coordinates the recommendation.
+- src/gemini.ts performs bounded reasoning and outreach generation.
+- src/slack.ts handles the approval surface.
+- src/gmail.ts sends or dry-runs approved outreach.
+- src/storage.ts saves the result.
+- data/capability_profile.json is the source of truth.
+- data/results.json is MVP memory.
+- tests/flow.test.ts verifies the complete path.
+
+Avoid abstractions that do not help complete the demo.
+
+## Product rules
+
+The capability profile is authoritative. Never invent experience, skills, results, customers, credentials, or evidence. Important match reasons and outreach claims must come from the profile or fetched job.
+
+Keep these concepts understandable:
+
+- signal: what the job posting says.
+- opportunity: why the posting may be commercially relevant.
+- action: what outreach Odyva recommends.
+
+Use an explainable weighted score:
+
+~~~text
+score = capabilityFit × 0.4 + intent × 0.3 + evidence × 0.2 + urgency × 0.1
+~~~
+
+Gemini may interpret evidence and generate wording. It must not create unsupported evidence or send email directly.
+
+External communication requires explicit Slack approval.
+
+## Safety defaults
+
+Development defaults to:
+
+~~~env
+APP_ENV=development
+EXECUTION_MODE=dry_run
+~~~
+
+Gmail should draft, log, or dry-run unless live sending is explicitly enabled and the action is approved in Slack. Greenhouse is read-only.
+
+AWS may appear in documentation only as the eventual host for the runtime. JSON is sufficient for MVP storage and memory.
+
+## Explicit non-goals
+
+Do not add ECS microservices, SQS, EventBridge, dead-letter queues, multi-tenancy, generic connector frameworks, multiple workers, event sourcing, distributed memory, production-grade retries, CRM abstractions, broad observability, or full evaluation infrastructure.
+
+## Working method
+
+Before meaningful implementation:
+
+1. Read AGENTS.md and README.md.
+2. Read docs/CURRENT_STATE.md and docs/ARCHITECTURE.md.
+3. Inspect only the relevant implementation.
+4. Build the smallest complete vertical slice.
+5. Run the relevant tests or checks.
+6. Update documentation only when behavior or scope changes.
+
+Prefer one complete thin path over partially building many components. Do not perform unrelated cleanup or refactoring.
+
+## Definition of done
+
+The MVP is done when it can find a recent Greenhouse job, normalize it, match it against capability_profile.json, produce an explainable score, generate grounded outreach through Gemini, show it in Slack, require approval, send or dry-run through Gmail, and save the result.
