@@ -1,260 +1,146 @@
 # CURRENT_STATE.md
 
-## purpose
-
-this file must describe the real repository as it exists now.
-
-it must not describe the desired architecture as if it already exists.
-
-the first coding agent should inspect the repository and update this file with verified facts.
-
----
-
-## known hackathon requirements
-
-the project must:
-
-```text
-build one useful multi-step ai agent
-connect to at least three external apps
-show how we know it works
-provide an accessible github repo
-provide a demo video under two minutes
-```
-
-odyva's intended external apps are:
-
-```text
-greenhouse
-slack
-gmail
-google sheets
-```
-
----
-
-## known product flow
-
-target mvp:
-
-```text
-greenhouse
-→ normalize
-→ capability match
-→ score
-→ hermes
-→ gemini
-→ slack approval
-→ gmail
-→ google sheets
-```
-
----
-
-## known runtime decisions
-
-```text
-hermes = runtime operator
-gemini api = primary ai caller
-slack = human approval
-gmail = approved outbound execution
-google sheets = external record
-sol + luna = development-only
-aws = optional for hackathon demo
-```
-
----
-
-## repository status
-
-the actual codebase state has not been verified inside this document yet.
-
-do not assume any of these already exist:
-
-```text
-greenhouse integration
-capability matcher
-hermes runtime
-gemini integration
-slack approval
-gmail execution
-google sheets logging
-tests
-deployment
-```
-
----
-
-## required first repo scan
-
-before major implementation changes, inspect:
-
-```text
-1. top-level tree
-2. package manager
-3. language/runtime
-4. package.json scripts
-5. entry point
-6. existing hermes code
-7. existing gemini code
-8. existing greenhouse code
-9. existing slack code
-10. existing gmail code
-11. existing google sheets code
-12. persistence
-13. tests
-14. environment variables
-15. working end-to-end behavior
-```
-
----
-
-## update template
-
-replace this section after the real repo scan.
-
-### stack
-
-```text
-language:
-runtime:
-package manager:
-framework:
-database/storage:
-```
-
-### run commands
-
-```text
-install:
-run:
-test:
-build:
-```
-
-### working
-
-```text
-- ...
-- ...
-```
-
-### partial
-
-```text
-- ...
-- ...
-```
-
-### missing
-
-```text
-- ...
-- ...
-```
-
-### current end-to-end flow
-
-```text
-...
-```
-
-### external apps verified
-
-```text
-greenhouse:
-slack:
-gmail:
-google sheets:
-```
-
-### tests
-
-```text
-test command:
-passing:
-failing:
-```
-
-### known blockers
-
-```text
-- ...
-- ...
-```
-
----
-
-## priority order
-
-the coding agent should always work on the first missing part of this chain:
-
-```text
-greenhouse
-→ normalize
-→ match
-→ score
-→ gemini
-→ hermes
-→ slack
-→ gmail
-→ google sheets
-```
-
-after the full chain works:
-
-```text
-happy path
-→ reject path
-→ duplicate approval
-→ gemini failure
-→ gmail failure
-→ sheets failure
-→ readme completion
-→ demo recording
-```
-
----
-
-## readme submission gate
-
-before submission, confirm `README.md` contains:
-
-```text
-## 01. Project Overview
-## 02. External Apps Used
-## 03. Setup Instructions
-## 04. Reliability Testing
-## 05. Demo Video
-```
-
-and that:
-
-```text
-setup commands are real
-test counts are real
-video link is real
-no TODO submission placeholders remain
-```
-
----
-
-## rule
-
-do not refactor working code for style while the demo loop is incomplete.
-
-the order is:
-
-```text
-working
-→ reliable
-→ clear
-→ polished
-```
-
-not:
-
-```text
-perfect architecture
-→ eventually working
-```
+## Audit
+
+Repository audit completed on 2026-09-13 before implementation changes. The repository is a Git project on branch master with origin set to the Job_GTM GitHub repository.
+
+## Stack
+
+~~~text
+language: TypeScript
+runtime: Node.js v22.20.0
+package manager: npm 10.9.3
+framework: none
+database/storage: local JSON files
+dependencies: none
+~~~
+
+The TypeScript files run directly through Node's strip-only TypeScript support. No third-party dependency installation was required.
+
+## Commands
+
+~~~text
+install: npm install
+run: npm run demo
+test: npm test
+syntax check: npm run check
+build: not configured
+lint: not configured
+~~~
+
+The demo requires environment configuration. Safe local mode uses a Greenhouse board token, mock Gemini and Slack modes, Slack approval supplied through the environment, Gmail dry-run mode, and mock Sheets mode.
+
+## Repository layout
+
+The repository contains:
+
+- src/index.ts
+- src/greenhouse.ts
+- src/matcher.ts
+- src/hermes.ts
+- src/gemini.ts
+- src/slack.ts
+- src/gmail.ts
+- src/sheets.ts
+- src/storage.ts
+- data/capability_profile.json
+- data/results.json
+- tests/flow.test.ts
+- .env.example
+- package.json
+- tsconfig.json
+- four core documents in docs/
+
+The capability profile now contains only information supplied in the project documentation. Results storage starts as an empty JSON array.
+
+## Working functionality
+
+- Greenhouse fetches the public Job Board API and normalizes job id, company, role, source URL, description, and updated timestamp.
+- A live read-only request to the public GuidePoint Security board returned 56 jobs.
+- The matcher calculates capability fit, intent, evidence, urgency, overall score, matched capabilities, and reasons deterministically.
+- Gemini has a live REST adapter with structured JSON response validation and a grounded local mock mode.
+- Slack has a live chat.postMessage adapter, Block Kit approval card, and interaction payload parser.
+- Gmail supports dry_run, draft, and live modes with a process-level action idempotency guard.
+- Google Sheets has a live values.append adapter and a local mock mode.
+- JSON storage can load and upsert flow results.
+- Hermes coordinates the flow and blocks Gmail until approval.
+- The complete local-safe flow was run against live Greenhouse data with mock Gemini, mock Slack, Gmail dry-run, and mock Sheets.
+
+## Partial functionality
+
+- Slack approval cards can be posted, and block action payloads can be parsed, but a public callback server is not yet wired into the demo command.
+- Gemini live calls are implemented but have not been verified because no API key is configured.
+- Gmail live/draft calls are implemented but have not been verified because no Google OAuth credentials are configured.
+- Google Sheets live append is implemented but has not been verified because no spreadsheet or OAuth credentials are configured.
+- Local persistence is implemented, but the live demo run used a temporary result path and did not write a repository result.
+
+## Missing functionality
+
+- Slack interaction callback delivery into a running flow
+- configured Gemini API credentials and live verification
+- configured Gmail OAuth and live or draft verification
+- configured Google Sheets OAuth and append verification
+- a saved real fallback job for recording
+- README setup and reliability sections updated with final command evidence
+- end-to-end tests against authenticated external apps
+
+## Current end-to-end flow
+
+~~~text
+live Greenhouse job
+→ normalized job
+→ deterministic capability match and score
+→ Hermes orchestration
+→ grounded mock or live Gemini draft
+→ Slack mock card or live approval card
+→ environment-supplied approval
+→ Gmail dry-run, draft, or live action
+→ Sheets mock or live row
+→ local JSON result
+~~~
+
+The local-safe path is verified. The live multi-app path is waiting on credentials and Slack callback delivery.
+
+## External apps verified
+
+~~~text
+greenhouse: live public fetch verified against GuidePoint Security; 56 jobs returned
+slack: mock card path and block action parser tested; live post not authenticated
+gmail: dry_run and idempotency tested; draft/live not authenticated
+google sheets: mock append and failure handling tested; live append not authenticated
+gemini: mock generation and validation tested; live provider not authenticated
+hermes: local orchestration and approval gate tested
+~~~
+
+## Tests
+
+~~~text
+test command: npm test
+passing: 12
+failing: 0
+syntax check: npm run check passed
+manual verification: live Greenhouse fetch plus complete local-safe approved dry-run
+~~~
+
+Reliability cases covered by tests:
+
+- happy path
+- reject path
+- duplicate approval
+- Gemini failure
+- Gmail failure
+- Google Sheets failure
+- Greenhouse normalization and fetch
+- Gemini mock grounding
+- Slack approval payload parsing
+- Gmail dry-run idempotency
+
+## Known blockers
+
+- No API keys, OAuth tokens, spreadsheet id, Slack bot token, or public Slack interaction URL are present in the repository.
+- Live Slack approval requires an externally reachable request URL for Block Kit interaction payloads.
+- Live Gmail, Google Sheets, and Gemini verification cannot proceed without credentials or explicit OAuth approval.
+
+## Next step
+
+Add the minimal Slack interaction callback server or an equivalent approval handoff, then verify authenticated Slack, Gmail, Google Sheets, and Gemini paths as credentials become available.

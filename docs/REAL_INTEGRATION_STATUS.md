@@ -1,0 +1,10 @@
+# Real Integration Status
+
+| service | code exists | authenticated | real external request succeeded | proof | blocker |
+| Hermes | no (the repository `src/hermes.ts` is local orchestration, not the Hermes Agent runtime) | no (the installed runtime has credentials present, but no usable authenticated model) | no | Hermes Agent v0.20.5 is installed; gateway is running with PID 5496; real chat attempts returned HTTP 404 for `stealth/ox-alpha`, HTTP 402 for OpenRouter Gemini credits, and HTTP 401 when the OpenAI provider rejected the stored credential; no local tool invocation succeeded | a usable Hermes model/provider must be configured; Gemini is not configured |
+| Gemini | yes (live REST adapter) | no | no | `src/gemini.ts` contains the live `generateContent` adapter; no live request has succeeded | `GEMINI_API_KEY` is missing |
+| Slack | yes (live post and callback server) | no | no | `src/slack.ts` contains the live `chat.postMessage` adapter and signed callback server; only mock payload/parser tests have run | bot token, signing secret, target channel, and reachable callback URL are not configured |
+| Gmail | yes (draft/live adapter) | no | no | `src/gmail.ts` contains Gmail draft/send adapters; only dry-run and idempotency tests have run | Google OAuth credentials are not configured |
+| Google Sheets | yes (live append adapter) | no | no | `src/sheets.ts` contains the Sheets values append adapter; only mock append tests have run | Google OAuth credentials and target spreadsheet are not configured |
+| Greenhouse | yes (live public-board adapter) | n/a (public board) | yes | GuidePoint Security board returned HTTP 200 with 56 jobs; a real job ID, title, and source URL were observed | no authentication blocker; fallback fixture still needs to be saved |
+| AWS | no | no | no | AWS Builder page was reachable but showed no projects; opening a console session led to the AWS Sign-In page | AWS account authentication is required before an account, region, runtime, or public endpoint can be inspected |

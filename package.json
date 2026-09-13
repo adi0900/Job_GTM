@@ -1,0 +1,15 @@
+{
+  "name": "odyva-gtm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "demo": "node --experimental-strip-types src/index.ts",
+    "test": "node --experimental-strip-types --test tests/flow.test.ts",
+    "check": "node --experimental-strip-types --check src/index.ts"
+  }
+}
