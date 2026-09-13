@@ -1,8 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+import { App } from "@slack/bolt";
 import type { NormalizedJob } from "./greenhouse.ts";
 import type { OpportunityMatch } from "./matcher.ts";
 import type { OutreachDraft } from "./gemini.ts";
+
+const execFileAsync = promisify(execFile);
 
 export type ApprovalDecision = "approve" | "reject";
 
@@ -13,7 +20,14 @@ export interface ApprovalMessageInput {
   outreach: OutreachDraft;
 }
 
-export interface SlackOptions {
+export interface SlackJudgePolicy {
+  judgeMode?: boolean;
+  judgeChannelId?: string;
+  judgeWorkspaceId?: string;
+  allowedUserIds?: readonly string[];
+}
+
+export interface SlackOptions extends SlackJudgePolicy {
   botToken?: string;
   channelId?: string;
   mode?: "live" | "mock";
@@ -38,15 +52,74 @@ export interface SlackInteractionServer {
   close: () => Promise<void>;
 }
 
-export interface SlackSocketModeOptions {
+export interface SlackSocketModeOptions extends SlackJudgePolicy {
+  botToken?: string;
   appToken?: string;
   onDecision: (decision: { actionId: string; decision: ApprovalDecision }) => Promise<void>;
+  onMessage?: (message: NormalizedSlackMessage) => Promise<void>;
+  fileIngestion?: Omit<SlackFileIngestionOptions, "botToken">;
   fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
 
 export interface SlackSocketModeClient {
   connect: () => Promise<void>;
   close: () => Promise<void>;
+}
+
+export interface SlackAttachmentMetadata {
+  slack_file_id: string;
+  filename: string;
+  mimetype: string;
+  local_path: string;
+  cloud_uri?: string;
+  channel_id?: string;
+  thread_ts?: string;
+  user_id?: string;
+  downloaded_at: string;
+}
+
+export interface SlackNormalizedAttachment extends SlackAttachmentMetadata {
+  id: string;
+  name: string;
+  type: string;
+  path: string;
+  mime_type: string;
+}
+
+export interface NormalizedSlackMessage {
+  platform: "slack";
+  user_id?: string;
+  channel_id?: string;
+  text: string;
+  thread_ts?: string;
+  attachments: SlackNormalizedAttachment[];
+}
+
+export interface SlackFileIngestionOptions extends SlackJudgePolicy {
+  botToken?: string;
+  workspaceRoot?: string;
+  ttlMs?: number;
+  fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
+  getThreadMessages?: (channelId: string, threadTs: string) => Promise<unknown[]>;
+  persist?: (input: {
+    metadata: SlackAttachmentMetadata;
+    bytes: Uint8Array;
+  }) => Promise<string | undefined>;
+}
+
+export interface SlackInboundMessageEvent {
+  type?: string;
+  subtype?: string;
+  user?: string;
+  channel?: string;
+  ts?: string;
+  thread_ts?: string;
+  text?: string;
+  files?: unknown[];
+  file_id?: string;
+  file_ids?: string[];
+  team?: string;
+  team_id?: string;
 }
 
 interface SlackWebSocket {
@@ -56,6 +129,288 @@ interface SlackWebSocket {
 }
 
 type SlackWebSocketConstructor = new (url: string) => SlackWebSocket;
+
+interface SlackFileRecord {
+  id?: unknown;
+  name?: unknown;
+  title?: unknown;
+  mimetype?: unknown;
+  url_private_download?: unknown;
+  url_private?: unknown;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function idValue(value: unknown): string | undefined {
+  if (typeof value === "string") return stringValue(value);
+  return stringValue(asRecord(value)?.id);
+}
+
+function judgeContextAllowed(value: unknown, policy: SlackJudgePolicy): boolean {
+  if (!policy.judgeMode) return true;
+  const record = asRecord(value);
+  const channelId =
+    idValue(record?.channel) ||
+    stringValue(asRecord(record?.container)?.channel_id) ||
+    stringValue(record?.channel_id);
+  const workspaceId =
+    idValue(record?.team) ||
+    stringValue(record?.team_id) ||
+    stringValue(record?.workspaceId) ||
+    stringValue(record?.workspace_id);
+  const userId = idValue(record?.user) || stringValue(record?.user_id);
+  return Boolean(
+    policy.judgeChannelId &&
+      channelId === policy.judgeChannelId &&
+      policy.allowedUserIds?.includes(userId || "") &&
+      (!policy.judgeWorkspaceId || workspaceId === policy.judgeWorkspaceId),
+  );
+}
+
+function assertJudgeContext(value: unknown, policy: SlackJudgePolicy): void {
+  if (policy.judgeMode && !judgeContextAllowed(value, policy)) {
+    throw new Error("Slack: judge policy rejected this user, workspace, or channel");
+  }
+}
+
+function slackWorkspaceRoot(options: SlackFileIngestionOptions): string {
+  const configuredRoot =
+    options.workspaceRoot ||
+    (options.judgeMode ? process.env.JUDGE_WORKSPACE_ROOT : process.env.SLACK_WORKSPACE_ROOT) ||
+    (options.judgeMode ? join(process.cwd(), "workspace", "judge") : "/opt/odyva-gtm/workspace/slack");
+  if (!options.judgeMode) return configuredRoot;
+
+  const appRoot = resolve(process.cwd());
+  const root = resolve(configuredRoot);
+  const relativeRoot = relative(appRoot, root);
+  if (relativeRoot === ".." || relativeRoot.startsWith(".." + sep) || isAbsolute(relativeRoot)) {
+    throw new Error("Slack: JUDGE_WORKSPACE_ROOT must stay inside the app workspace");
+  }
+  return root;
+}
+
+function judgeTtlMs(options: SlackFileIngestionOptions): number {
+  const configured = options.ttlMs ?? Number(process.env.JUDGE_WORKSPACE_TTL_MS || 900000);
+  return Number.isFinite(configured) && configured > 0 ? configured : 900000;
+}
+
+async function cleanupJudgeWorkspace(root: string, ttlMs: number): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const cutoff = Date.now() - ttlMs;
+  for (const entry of entries) {
+    const entryPath = join(root, entry.name);
+    try {
+      const details = await stat(entryPath);
+      if (details.mtimeMs < cutoff) {
+        await rm(entryPath, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+function scheduleJudgeCleanup(root: string, ttlMs: number): void {
+  const timer = setTimeout(() => {
+    void cleanupJudgeWorkspace(root, ttlMs).catch(() => undefined);
+  }, ttlMs);
+  timer.unref?.();
+}
+
+function safePathPart(value: string | undefined, fallback: string): string {
+  const safe = (value || fallback)
+    .replace(/\.\./g, "_")
+    .replace(/[\\/]/g, "_")
+    .replace(/[^a-zA-Z0-9._ -]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/^\.+$/, "_")
+    .slice(0, 180);
+  return safe || fallback;
+}
+
+function fileIdFrom(value: unknown): string | undefined {
+  if (typeof value === "string") return stringValue(value);
+  return stringValue(asRecord(value)?.id);
+}
+
+function fileReferencesFrom(message: SlackInboundMessageEvent): unknown[] {
+  const references: unknown[] = Array.isArray(message.files) ? [...message.files] : [];
+  const ids = [
+    ...(Array.isArray(message.file_ids) ? message.file_ids : []),
+    message.file_id,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const seen = new Set(references.map(fileIdFrom).filter((value): value is string => Boolean(value)));
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      references.push(id);
+      seen.add(id);
+    }
+  }
+  return references;
+}
+
+async function fetchSlackFileInfo(fileId: string, options: SlackFileIngestionOptions): Promise<SlackFileRecord> {
+  if (!options.botToken) throw new Error("Slack: SLACK_BOT_TOKEN is required for files.info");
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl(
+    "https://slack.com/api/files.info?file=" + encodeURIComponent(fileId),
+    { headers: { authorization: "Bearer " + options.botToken } },
+  );
+  const payload = await response.json() as { ok?: boolean; error?: string; file?: SlackFileRecord };
+  if (!response.ok || payload.ok !== true || !payload.file) {
+    throw new Error("Slack: files.info failed" + (payload.error ? ": " + payload.error : ""));
+  }
+  return payload.file;
+}
+
+async function resolveSlackFileRecord(reference: unknown, options: SlackFileIngestionOptions): Promise<SlackFileRecord> {
+  const supplied = typeof reference === "string" ? { id: reference } : asRecord(reference);
+  const fileId = fileIdFrom(reference);
+  if (!fileId) throw new Error("Slack: incoming attachment is missing a file id");
+  const hasPrivateUrl = Boolean(stringValue(supplied?.url_private_download) || stringValue(supplied?.url_private));
+  if (!options.judgeMode && hasPrivateUrl && stringValue(supplied?.name || supplied?.title)) {
+    return supplied as SlackFileRecord;
+  }
+  return { ...await fetchSlackFileInfo(fileId, options), ...supplied } as SlackFileRecord;
+}
+
+export async function downloadSlackFile(
+  reference: unknown,
+  context: { channelId?: string; threadTs?: string; userId?: string; workspaceId?: string } = {},
+  options: SlackFileIngestionOptions = {},
+): Promise<SlackAttachmentMetadata> {
+  assertJudgeContext(context, options);
+  if (!options.botToken) throw new Error("Slack: SLACK_BOT_TOKEN is required for file download");
+  const file = await resolveSlackFileRecord(reference, options);
+  const fileId = fileIdFrom(file);
+  if (!fileId) throw new Error("Slack: resolved attachment is missing a file id");
+  const downloadUrl = stringValue(file.url_private_download) || stringValue(file.url_private);
+  if (!downloadUrl) throw new Error("Slack: files.info returned no private download URL");
+
+  const filename = safePathPart(stringValue(file.name) || stringValue(file.title), fileId);
+  const root = slackWorkspaceRoot(options);
+  const ttlMs = judgeTtlMs(options);
+  if (options.judgeMode) await cleanupJudgeWorkspace(root, ttlMs);
+  const localPath = join(
+    root,
+    safePathPart(context.channelId, "unknown-channel"),
+    safePathPart(context.threadTs, "root"),
+    safePathPart(fileId, fileId),
+    filename,
+  );
+  await mkdir(dirname(localPath), { recursive: true });
+
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl(downloadUrl, {
+    headers: { authorization: "Bearer " + options.botToken },
+  });
+  if (!response.ok) {
+    throw new Error("Slack: file download failed with HTTP " + response.status);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await writeFile(localPath, bytes);
+
+  const metadata: SlackAttachmentMetadata = {
+    slack_file_id: fileId,
+    filename,
+    mimetype: stringValue(file.mimetype) || "application/octet-stream",
+    local_path: localPath,
+    channel_id: context.channelId,
+    thread_ts: context.threadTs,
+    user_id: context.userId,
+    downloaded_at: new Date().toISOString(),
+  };
+  if (options.persist) {
+    metadata.cloud_uri = await options.persist({ metadata, bytes });
+  }
+  await writeFile(localPath + ".metadata.json", JSON.stringify(metadata, null, 2) + "\n", "utf8");
+  if (options.judgeMode) scheduleJudgeCleanup(root, ttlMs);
+  return metadata;
+}
+
+export async function ingestSlackMessage(
+  message: SlackInboundMessageEvent,
+  options: SlackFileIngestionOptions = {},
+): Promise<NormalizedSlackMessage> {
+  assertJudgeContext(message, options);
+  const channelId = stringValue(message.channel);
+  const threadTs = stringValue(message.thread_ts);
+  let references = fileReferencesFrom(message);
+  if (references.length === 0 && channelId && threadTs && options.getThreadMessages) {
+    const threadMessages = await options.getThreadMessages(channelId, threadTs);
+    references = threadMessages
+      .filter((item) => {
+        if (!options.judgeMode) return true;
+        const record = asRecord(item) || {};
+        return judgeContextAllowed({
+          ...record,
+          channel: channelId,
+          team_id: stringValue(record.team_id) || stringValue(message.team_id) || stringValue(message.team),
+        }, options);
+      })
+      .flatMap((item) => fileReferencesFrom(asRecord(item) as SlackInboundMessageEvent));
+  }
+
+  const attachments: SlackNormalizedAttachment[] = [];
+  for (const reference of references) {
+    const metadata = await downloadSlackFile(reference, {
+      channelId,
+      threadTs: threadTs || stringValue(message.ts),
+      userId: stringValue(message.user),
+      workspaceId: stringValue(message.team) || stringValue(message.team_id),
+    }, options);
+    attachments.push({
+      ...metadata,
+      id: metadata.slack_file_id,
+      name: metadata.filename,
+      type: metadata.mimetype,
+      path: metadata.local_path,
+      mime_type: metadata.mimetype,
+    });
+  }
+
+  return {
+    platform: "slack",
+    user_id: stringValue(message.user),
+    channel_id: channelId,
+    text: stringValue(message.text) || "",
+    thread_ts: threadTs,
+    attachments,
+  };
+}
+
+export async function extractPdfText(localPath: string): Promise<string> {
+  try {
+    const result = await execFileAsync("pdftotext", [localPath, "-"], { maxBuffer: 16 * 1024 * 1024 });
+    return result.stdout;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
+      try {
+        const pdfParseModule = await import("pdf-parse");
+        const pdfParse = (pdfParseModule as unknown as {
+          default?: (data: Buffer) => Promise<{ text?: string }>;
+        }).default || (pdfParseModule as unknown as (data: Buffer) => Promise<{ text?: string }>);
+        const parsed = await pdfParse(await readFile(localPath));
+        return parsed.text || "";
+      } catch {
+        throw new Error("Slack: no usable PDF parser is installed on the AWS runtime");
+      }
+    }
+    throw new Error("Slack: PDF extraction failed");
+  }
+}
 
 function escapeSlack(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -103,16 +458,16 @@ export function buildApprovalBlocks(input: ApprovalMessageInput): unknown[] {
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "Approve + Send" },
+          text: { type: "plain_text", text: "Approve + Draft" },
           style: "primary",
-          action_id: "odyva_approve",
+          action_id: "approve_send",
           value: JSON.stringify({ actionId: input.actionId, decision: "approve" }),
         },
         {
           type: "button",
           text: { type: "plain_text", text: "Reject" },
           style: "danger",
-          action_id: "odyva_reject",
+          action_id: "reject",
           value: JSON.stringify({ actionId: input.actionId, decision: "reject" }),
         },
       ],
@@ -133,11 +488,15 @@ export function parseSlackInteraction(payload: unknown): { actionId: string; dec
     return undefined;
   }
   const action = record.actions[0] as Record<string, unknown>;
+  const actionId = typeof action.action_id === "string" ? action.action_id : "";
+  if (actionId !== "approve_send" && actionId !== "reject") return undefined;
   const value = typeof action.value === "string" ? action.value : "";
   try {
     const parsed = JSON.parse(value) as { actionId?: string; decision?: string };
     const decision = parseApprovalDecision(parsed.decision);
-    if (parsed.actionId && decision) return { actionId: parsed.actionId, decision };
+    if (parsed.actionId && decision && ((actionId === "approve_send" && decision === "approve") || (actionId === "reject" && decision === "reject"))) {
+      return { actionId: parsed.actionId, decision };
+    }
   } catch {
     return undefined;
   }
@@ -175,7 +534,7 @@ export function createSlackInteractionServer(options: SlackInteractionServerOpti
       const timestamp = Array.isArray(request.headers["x-slack-request-timestamp"])
         ? request.headers["x-slack-request-timestamp"][0]
         : request.headers["x-slack-request-timestamp"];
-      if (options.signingSecret && !validSlackSignature(rawBody, timestamp, signature, options.signingSecret)) {
+      if (!options.signingSecret || !validSlackSignature(rawBody, timestamp, signature, options.signingSecret)) {
         response.statusCode = 401;
         response.end("Invalid Slack signature");
         return;
@@ -217,76 +576,77 @@ export function createSlackInteractionServer(options: SlackInteractionServerOpti
 }
 
 export function createSlackSocketModeClient(options: SlackSocketModeOptions): SlackSocketModeClient {
-  let socket: SlackWebSocket | undefined;
-  let closed = false;
-
-  const handleMessage = (event: unknown): void => {
-    const data =
-      event && typeof event === "object" && "data" in event
-        ? (event as { data?: unknown }).data
-        : undefined;
-    const text = typeof data === "string" ? data : "";
-    if (!text) return;
-
-    let envelope: Record<string, unknown>;
-    try {
-      envelope = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return;
-    }
-
-    const envelopeId = typeof envelope.envelope_id === "string" ? envelope.envelope_id : undefined;
-    if (envelopeId && socket) {
-      socket.send(JSON.stringify({ envelope_id: envelopeId }));
-    }
-
-    const decision = parseSlackInteraction(envelope.payload);
-    if (decision) {
-      void options.onDecision(decision).catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : String(error));
-      });
-    }
-  };
+  let app: App | undefined;
 
   return {
     connect: async () => {
       if (!options.appToken) {
         throw new Error("Slack: SLACK_APP_TOKEN is required for Socket Mode");
       }
-      const WebSocketImpl = (globalThis as typeof globalThis & {
-        WebSocket?: SlackWebSocketConstructor;
-      }).WebSocket;
-      if (!WebSocketImpl) {
-        throw new Error("Slack: this Node runtime does not provide WebSocket support");
+      if (!options.botToken) {
+        throw new Error("Slack: SLACK_BOT_TOKEN is required for Socket Mode");
+      }
+      if (options.judgeMode && process.env.GATEWAY_ALLOW_ALL_USERS?.toLowerCase() === "true") {
+        throw new Error("Slack: GATEWAY_ALLOW_ALL_USERS is not allowed in JUDGE_MODE");
+      }
+      if (options.judgeMode && (!options.judgeChannelId || !options.judgeWorkspaceId || !options.allowedUserIds?.length)) {
+        throw new Error("Slack: JUDGE_MODE requires a judge workspace, channel, and user allowlist");
       }
 
-      const fetchImpl = options.fetchImpl || fetch;
-      const response = await fetchImpl("https://slack.com/api/apps.connections.open", {
-        method: "POST",
-        headers: { authorization: "Bearer " + options.appToken },
+      app = new App({
+        token: options.botToken,
+        appToken: options.appToken,
+        socketMode: true,
       });
-      const payload = (await response.json()) as { ok?: boolean; url?: string; error?: string };
-      if (!response.ok || payload.ok !== true || !payload.url) {
-        throw new Error("Slack: Socket Mode connection failed" + (payload.error ? ": " + payload.error : ""));
-      }
-
-      closed = false;
-      socket = new WebSocketImpl(payload.url);
-      socket.addEventListener("message", handleMessage);
-      await new Promise<void>((resolve, reject) => {
-        const current = socket;
-        if (!current) {
-          reject(new Error("Slack: Socket Mode socket was not created"));
+      app.action("approve_send", async ({ ack, body }) => {
+        await ack();
+        if (!judgeContextAllowed(body, options)) {
+          console.log("SLACK_JUDGE_ACTION_BLOCKED");
           return;
         }
-        current.addEventListener("open", () => resolve());
-        current.addEventListener("error", () => reject(new Error("Slack: Socket Mode socket failed")));
+        console.log("SLACK_APPROVE_RECEIVED");
+        const decision = parseSlackInteraction(body);
+        if (decision) await options.onDecision(decision);
       });
+      app.action("reject", async ({ ack, body }) => {
+        await ack();
+        if (!judgeContextAllowed(body, options)) {
+          console.log("SLACK_JUDGE_ACTION_BLOCKED");
+          return;
+        }
+        console.log("SLACK_REJECT_RECEIVED");
+        const decision = parseSlackInteraction(body);
+        if (decision) await options.onDecision(decision);
+      });
+      if (options.onMessage) {
+        app.event("app_mention", async ({ event, client }) => {
+          try {
+            assertJudgeContext(event, options);
+            const message = await ingestSlackMessage(event as unknown as SlackInboundMessageEvent, {
+              ...options.fileIngestion,
+              botToken: options.botToken,
+              fetchImpl: options.fetchImpl,
+              judgeMode: options.judgeMode,
+              judgeChannelId: options.judgeChannelId,
+              judgeWorkspaceId: options.judgeWorkspaceId,
+              allowedUserIds: options.allowedUserIds,
+              getThreadMessages: async (channelId, threadTs) => {
+                const replies = await client.conversations.replies({ channel: channelId, ts: threadTs });
+                return Array.isArray(replies.messages) ? replies.messages as unknown[] : [];
+              },
+            });
+            await options.onMessage(message);
+          } catch (error) {
+            console.error(error instanceof Error ? error.message : "Slack: inbound file ingestion failed");
+          }
+        });
+      }
+      await app.start();
+      console.log("SLACK_SOCKET_CONNECTED");
     },
     close: async () => {
-      closed = true;
-      socket?.close();
-      socket = undefined;
+      if (app) await app.stop();
+      app = undefined;
     },
   };
 }
@@ -296,6 +656,14 @@ export async function postApproval(
   options: SlackOptions = {},
 ): Promise<SlackPostResult> {
   const mode = options.mode || (options.botToken && options.channelId ? "live" : "mock");
+  if (options.judgeMode) {
+    if (mode !== "live") {
+      throw new Error("Slack: JUDGE_MODE requires SLACK_MODE=live");
+    }
+    if (!options.judgeChannelId || options.channelId !== options.judgeChannelId) {
+      throw new Error("Slack: JUDGE_MODE requires the dedicated judge channel");
+    }
+  }
   if (mode === "mock") {
     return { status: "mock", actionId: input.actionId, channelId: options.channelId };
   }

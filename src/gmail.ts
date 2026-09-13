@@ -15,6 +15,7 @@ export interface EmailResult {
 
 export interface GmailOptions {
   mode?: EmailMode;
+  judgeMode?: boolean;
   accessToken?: string;
   clientId?: string;
   clientSecret?: string;
@@ -74,13 +75,15 @@ export function createGmailClient(options: GmailOptions = {}) {
   const executed = new Map<string, EmailResult>();
   return {
     async sendApprovedEmail(input: EmailInput): Promise<EmailResult> {
-      const previous = executed.get(input.actionId);
-      if (previous) return previous;
-
       const mode = options.mode || "dry_run";
       if (!["dry_run", "draft", "live"].includes(mode)) {
         throw new Error("Gmail: EMAIL_MODE must be dry_run, draft, or live");
       }
+      if (options.judgeMode && mode !== "draft") {
+        throw new Error("Gmail: JUDGE_MODE requires EMAIL_MODE=draft");
+      }
+      const previous = executed.get(input.actionId);
+      if (previous) return previous;
       if (!input.to) {
         throw new Error("Gmail: recipient is required");
       }

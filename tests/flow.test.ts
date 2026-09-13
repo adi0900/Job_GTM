@@ -127,7 +127,7 @@ test("parses a valid Slack approval payload", async () => {
   assert.deepEqual(parseSlackInteraction({
     type: "block_actions",
     actions: [{
-      action_id: "odyva_approve",
+      action_id: "approve_send",
       value: JSON.stringify({ actionId: "abc123", decision: "approve" }),
     }],
   }), { actionId: "abc123", decision: "approve" });
@@ -237,4 +237,54 @@ test("Gmail client enforces dry-run idempotency", async () => {
   await client.sendApprovedEmail(input);
   await client.sendApprovedEmail(input);
   assert.equal((await client.sendApprovedEmail(input)).externalId, "dry-run:same-action");
+});
+
+test("judge mode refuses non-draft Gmail", async () => {
+  const { createGmailClient } = await import("../src/gmail.ts");
+  const client = createGmailClient({ mode: "live", judgeMode: true });
+  await assert.rejects(
+    client.sendApprovedEmail({ actionId: "judge-email", to: "judge@example.com", subject: "Test", body: "Hello" }),
+    /JUDGE_MODE requires EMAIL_MODE=draft/,
+  );
+});
+
+test("judge mode refuses a non-dedicated Google Sheet", async () => {
+  const { createSheetsClient } = await import("../src/sheets.ts");
+  const client = createSheetsClient({
+    mode: "live",
+    judgeMode: true,
+    spreadsheetId: "production-sheet",
+    judgeSpreadsheetId: "judge-sheet",
+  });
+  await assert.rejects(
+    client.appendResultRow({
+      timestamp: "2026-09-14T00:00:00.000Z",
+      company: "Acme",
+      role: "Growth Engineer",
+      sourceUrl: "https://example.com/job-1",
+      matchScore: 90,
+      decision: "approve",
+      emailStatus: "draft",
+    }),
+    /dedicated judge spreadsheet/,
+  );
+});
+
+test("judge mode refuses posting outside the dedicated Slack channel", async () => {
+  const { postApproval } = await import("../src/slack.ts");
+  await assert.rejects(
+    postApproval({
+      actionId: "judge-slack",
+      job,
+      match: matchOpportunity(job, profile, new Date("2026-09-13T12:00:00.000Z")),
+      outreach,
+    }, {
+      mode: "live",
+      judgeMode: true,
+      botToken: "token-placeholder",
+      channelId: "C-production",
+      judgeChannelId: "C-judge",
+    }),
+    /dedicated judge channel/,
+  );
 });

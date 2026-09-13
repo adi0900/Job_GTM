@@ -2,6 +2,10 @@
   "name": "odyva-gtm",
   "version": "0.1.0",
   "private": true,
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "pdf-parse": "^1.1.1"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.6.0"

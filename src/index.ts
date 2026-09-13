@@ -1,16 +1,79 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fetchGreenhouseJobs, normalizeGreenhouseJob } from "./greenhouse.ts";
 import type { GreenhouseJobRecord, NormalizedJob } from "./greenhouse.ts";
 import { generateOutreach } from "./gemini.ts";
 import { createGmailClient } from "./gmail.ts";
 import { runFlow, type FlowDependencies, type FlowRecord } from "./hermes.ts";
 import type { CapabilityProfile } from "./matcher.ts";
-import { createSlackInteractionServer, createSlackSocketModeClient, postApproval } from "./slack.ts";
+import { createSlackInteractionServer, createSlackSocketModeClient, extractPdfText, postApproval } from "./slack.ts";
 import { createSheetsClient } from "./sheets.ts";
 import { getResult, saveResult } from "./storage.ts";
 
-const resultsPath = process.env.RESULTS_PATH || "data/results.json";
+const judgeMode = process.env.JUDGE_MODE?.toLowerCase() === "true";
+
+function parseAllowlist(value: string | undefined): string[] {
+  return (value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const judgeAllowedUsers = parseAllowlist(process.env.JUDGE_SLACK_ALLOWED_USERS);
+
+function appWorkspacePath(filePath: string): string {
+  const appRoot = resolve(process.cwd());
+  const target = resolve(filePath);
+  const relativePath = relative(appRoot, target);
+  if (relativePath === ".." || relativePath.startsWith(".." + sep) || isAbsolute(relativePath)) {
+    throw new Error("JUDGE_MODE: filesystem paths must stay inside the app workspace");
+  }
+  return filePath;
+}
+
+const resultsPath = judgeMode
+  ? appWorkspacePath(process.env.RESULTS_PATH || "workspace/judge/results.json")
+  : process.env.RESULTS_PATH || "data/results.json";
+
+function requireJudgeValue(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error("JUDGE_MODE: " + name + " is required");
+  return value;
+}
+
+function validateJudgeConfiguration(): void {
+  if (!judgeMode) return;
+  if (process.env.EMAIL_MODE !== "draft") throw new Error("JUDGE_MODE: EMAIL_MODE must be draft");
+  if (process.env.SHEETS_MODE !== "live") throw new Error("JUDGE_MODE: SHEETS_MODE must be live");
+  if (process.env.SLACK_MODE !== "live") throw new Error("JUDGE_MODE: SLACK_MODE must be live");
+  if (process.env.SLACK_SOCKET_MODE !== "true") throw new Error("JUDGE_MODE: SLACK_SOCKET_MODE must be true");
+  if (process.env.SLACK_WAIT_FOR_APPROVAL !== "true") {
+    throw new Error("JUDGE_MODE: SLACK_WAIT_FOR_APPROVAL must be true");
+  }
+  if (process.env.GEMINI_MODE !== "live") throw new Error("JUDGE_MODE: GEMINI_MODE must be live");
+  if (process.env.GATEWAY_ALLOW_ALL_USERS?.toLowerCase() === "true") {
+    throw new Error("JUDGE_MODE: GATEWAY_ALLOW_ALL_USERS must not be enabled");
+  }
+  if (judgeAllowedUsers.length === 0) {
+    throw new Error("JUDGE_MODE: JUDGE_SLACK_ALLOWED_USERS must contain at least one user ID");
+  }
+  requireJudgeValue("JUDGE_SLACK_WORKSPACE_ID");
+  requireJudgeValue("JUDGE_SLACK_CHANNEL_ID");
+  requireJudgeValue("JUDGE_GMAIL_TO");
+  requireJudgeValue("JUDGE_SPREADSHEET_ID");
+  const ttlMs = Number(process.env.JUDGE_WORKSPACE_TTL_MS || 900000);
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new Error("JUDGE_MODE: JUDGE_WORKSPACE_TTL_MS must be a positive number");
+  }
+  if (process.env.GREENHOUSE_FIXTURE_PATH) {
+    throw new Error("JUDGE_MODE: GREENHOUSE_FIXTURE_PATH is not allowed; use live Greenhouse data");
+  }
+}
+
+function recipientEmail(): string | undefined {
+  return judgeMode ? process.env.JUDGE_GMAIL_TO : process.env.GMAIL_TO;
+}
 
 interface HealthServer {
   listen: () => Promise<void>;
@@ -46,6 +109,9 @@ async function loadProfile(): Promise<CapabilityProfile> {
 async function loadJobs(): Promise<NormalizedJob[]> {
   const fixturePath = process.env.GREENHOUSE_FIXTURE_PATH;
   if (fixturePath) {
+    if (judgeMode) {
+      throw new Error("JUDGE_MODE: fixture Greenhouse data is disabled");
+    }
     const raw = await readFile(fixturePath, "utf8");
     const parsed = JSON.parse(raw) as GreenhouseJobRecord[] | { jobs?: GreenhouseJobRecord[] };
     const jobs = Array.isArray(parsed) ? parsed : parsed.jobs || [];
@@ -80,6 +146,7 @@ function publicResult(result: FlowRecord): Record<string, unknown> {
 function createDependencies(): FlowDependencies {
   const gmail = createGmailClient({
     mode: (process.env.EMAIL_MODE as "dry_run" | "draft" | "live" | undefined) || "dry_run",
+    judgeMode,
     accessToken: process.env.GMAIL_ACCESS_TOKEN,
     clientId: process.env.GMAIL_CLIENT_ID,
     clientSecret: process.env.GMAIL_CLIENT_SECRET,
@@ -87,7 +154,9 @@ function createDependencies(): FlowDependencies {
   });
   const sheets = createSheetsClient({
     mode: process.env.SHEETS_MODE as "live" | "mock" | undefined,
-    spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    judgeMode,
+    spreadsheetId: judgeMode ? process.env.JUDGE_SPREADSHEET_ID : process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    judgeSpreadsheetId: judgeMode ? process.env.JUDGE_SPREADSHEET_ID : undefined,
     range: process.env.GOOGLE_SHEETS_RANGE,
     accessToken: process.env.GOOGLE_ACCESS_TOKEN,
     clientId: process.env.GOOGLE_CLIENT_ID,
@@ -107,7 +176,9 @@ function createDependencies(): FlowDependencies {
       postApproval(input, {
         mode: process.env.SLACK_MODE as "live" | "mock" | undefined,
         botToken: process.env.SLACK_BOT_TOKEN,
-        channelId: process.env.SLACK_CHANNEL_ID,
+        channelId: judgeMode ? process.env.JUDGE_SLACK_CHANNEL_ID : process.env.SLACK_CHANNEL_ID,
+        judgeMode,
+        judgeChannelId: judgeMode ? process.env.JUDGE_SLACK_CHANNEL_ID : undefined,
       }),
     sendApprovedEmail: gmail.sendApprovedEmail,
     appendSheetRow: sheets.appendResultRow,
@@ -121,7 +192,29 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
     let client: ReturnType<typeof createSlackSocketModeClient>;
     let handled = false;
     client = createSlackSocketModeClient({
+      botToken: process.env.SLACK_BOT_TOKEN,
       appToken: process.env.SLACK_APP_TOKEN,
+      judgeMode,
+      judgeChannelId: judgeMode ? process.env.JUDGE_SLACK_CHANNEL_ID : undefined,
+      judgeWorkspaceId: judgeMode ? process.env.JUDGE_SLACK_WORKSPACE_ID : undefined,
+      allowedUserIds: judgeMode ? judgeAllowedUsers : undefined,
+      fileIngestion: {
+        workspaceRoot: judgeMode ? process.env.JUDGE_WORKSPACE_ROOT : undefined,
+        ttlMs: judgeMode ? Number(process.env.JUDGE_WORKSPACE_TTL_MS || 900000) : undefined,
+      },
+      onMessage: async (message) => {
+        for (const attachment of message.attachments) {
+          if (attachment.mime_type !== "application/pdf") continue;
+          const resumeText = await extractPdfText(attachment.path);
+          console.log(JSON.stringify({
+            status: "slack_file_ingested",
+            fileId: attachment.slack_file_id,
+            localPath: attachment.path,
+            cloudUri: attachment.cloud_uri || null,
+            resumeChars: resumeText.length,
+          }, null, 2));
+        }
+      },
       onDecision: async ({ actionId, decision }) => {
         if (handled) return;
         if (actionId !== pending.actionId) {
@@ -131,7 +224,7 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
         const resumed = await runFlow({
           profile,
           decision,
-          recipientEmail: process.env.GMAIL_TO,
+          recipientEmail: recipientEmail(),
           dependencies: {
             ...dependencies,
             fetchJobs: async () => [pending.job],
@@ -164,7 +257,7 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
       const resumed = await runFlow({
         profile,
         decision,
-        recipientEmail: process.env.GMAIL_TO,
+        recipientEmail: recipientEmail(),
         dependencies: {
           ...dependencies,
           fetchJobs: async () => [pending.job],
@@ -187,6 +280,7 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
 }
 
 async function main(): Promise<void> {
+  validateJudgeConfiguration();
   const healthServer = createHealthServer(Number(process.env.HEALTH_PORT || 3001));
   await healthServer.listen();
   try {
@@ -194,7 +288,7 @@ async function main(): Promise<void> {
     const dependencies = createDependencies();
     const result = await runFlow({
       profile,
-      recipientEmail: process.env.GMAIL_TO,
+      recipientEmail: recipientEmail(),
       dependencies,
     });
     console.log(JSON.stringify(publicResult(result), null, 2));

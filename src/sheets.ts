@@ -10,6 +10,8 @@ export interface SheetRow {
 
 export interface SheetsOptions {
   spreadsheetId?: string;
+  judgeMode?: boolean;
+  judgeSpreadsheetId?: string;
   range?: string;
   mode?: "live" | "mock";
   accessToken?: string;
@@ -55,6 +57,12 @@ export function createSheetsClient(options: SheetsOptions = {}) {
   return {
     async appendResultRow(row: SheetRow): Promise<SheetsAppendResult> {
       const mode = options.mode || (options.spreadsheetId ? "live" : "mock");
+      if (options.judgeMode && mode !== "live") {
+        throw new Error("Google Sheets: JUDGE_MODE requires SHEETS_MODE=live");
+      }
+      if (options.judgeMode && (!options.judgeSpreadsheetId || options.spreadsheetId !== options.judgeSpreadsheetId)) {
+        throw new Error("Google Sheets: JUDGE_MODE requires the dedicated judge spreadsheet");
+      }
       if (mode === "mock") {
         return { status: "mock" };
       }

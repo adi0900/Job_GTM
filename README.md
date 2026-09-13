@@ -692,6 +692,31 @@ odyva-gtm/
 
 # Safety
 
+## Judge Safety Mode
+
+The public demo runs in a sandboxed judge environment.
+
+- Slack access is allowlisted.
+- Greenhouse access is read-only.
+- Gmail is restricted to draft creation only.
+- Google Sheets writes only to a dedicated judge spreadsheet.
+- No production customer data is used.
+- Uploaded resumes are isolated per run.
+- Secrets are stored only in server-side environment variables.
+- Judges do not receive AWS, Google Cloud, or Slack admin credentials.
+- External side effects require explicit human approval in Slack.
+
+Judge test flow:
+
+1. Join `#odyva-judge-test`.
+2. Upload a resume PDF.
+3. Mention `@Odyva GTM` and ask it to run the GTM workflow.
+4. Review the matched Greenhouse opportunity.
+5. Click **Approve + Draft**.
+6. Verify the Gmail draft and Google Sheets row.
+
+The most important rule is: judges should test through Slack, not by receiving your AWS/GCP credentials. For the safest possible setup, use a dedicated test Gmail account, a dedicated sheet, and a dedicated Slack channel, then revoke temporary tokens immediately after judging.
+
 ## Current Hackathon Runtime
 
 Hermes Agent v0.21.2 was installed and evaluated on AWS, but its native Gemini provider returned an authentication-header error despite the same credential succeeding against Google's API directly. To keep the hackathon execution path reliable, the final AWS-hosted agent calls Gemini directly.

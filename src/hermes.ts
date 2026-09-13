@@ -55,6 +55,7 @@ export class FlowError extends Error {
 }
 
 function decisionFromEnvironment(): ApprovalDecision | undefined {
+  if (process.env.JUDGE_MODE?.toLowerCase() === "true") return undefined;
   const value = process.env.SLACK_APPROVAL || process.env.APPROVAL;
   if (value === "approve" || value === "approved") return "approve";
   if (value === "reject" || value === "rejected") return "reject";
