@@ -19,6 +19,7 @@ export interface FlowRecord {
   status: "awaiting_approval" | "rejected" | "completed" | "failed" | "partial_failure";
   error?: string;
   emailExternalId?: string;
+  emailDraftId?: string;
   timestamp: string;
 }
 
@@ -31,6 +32,8 @@ export interface FlowDependencies {
   ) => Promise<OutreachDraft>;
   postApproval: (input: ApprovalMessageInput) => Promise<SlackPostResult>;
   sendApprovedEmail: (input: EmailInput) => Promise<EmailResult>;
+  createEmailDraft?: (input: EmailInput) => Promise<EmailResult>;
+  sendEmailDraft?: (draftId: string, actionId?: string) => Promise<EmailResult>;
   appendSheetRow: (row: SheetRow) => Promise<SheetsAppendResult>;
   saveResult: (result: FlowRecord) => Promise<void>;
   getResult?: (actionId: string) => Promise<FlowRecord | undefined>;
@@ -42,6 +45,7 @@ export interface RunFlowOptions {
   now?: Date;
   decision?: ApprovalDecision;
   recipientEmail?: string;
+  draftId?: string;
 }
 
 export class FlowError extends Error {
@@ -124,6 +128,22 @@ export async function runFlow(options: RunFlowOptions): Promise<FlowRecord> {
     return previous;
   }
 
+  const decision = options.decision || decisionFromEnvironment();
+  const emailInput: EmailInput = {
+    actionId,
+    to: options.recipientEmail || process.env.GMAIL_TO || "dry-run@example.invalid",
+    subject: outreach.subject,
+    body: outreach.body,
+  };
+  let preparedDraft: EmailResult | undefined;
+  if (!decision && options.dependencies.createEmailDraft) {
+    try {
+      preparedDraft = await options.dependencies.createEmailDraft(emailInput);
+    } catch (error) {
+      throw new FlowError("gmail", error instanceof Error ? error.message : String(error));
+    }
+  }
+
   const slackInput: ApprovalMessageInput = { actionId, job, match, outreach };
   let slack: SlackPostResult;
   try {
@@ -132,7 +152,6 @@ export async function runFlow(options: RunFlowOptions): Promise<FlowRecord> {
     throw new FlowError("slack", error instanceof Error ? error.message : String(error));
   }
 
-  const decision = options.decision || decisionFromEnvironment();
   const timestamp = new Date().toISOString();
   const record: FlowRecord = {
     actionId,
@@ -141,9 +160,13 @@ export async function runFlow(options: RunFlowOptions): Promise<FlowRecord> {
     outreach,
     slack,
     decision: decision || "pending",
-    emailStatus: "pending",
+    emailStatus: preparedDraft?.status || "pending",
     sheetStatus: "pending",
     status: decision ? (decision === "reject" ? "rejected" : "completed") : "awaiting_approval",
+    emailExternalId: preparedDraft?.externalId,
+    emailDraftId: preparedDraft?.status === "draft"
+      ? preparedDraft.externalId
+      : options.draftId,
     timestamp,
   };
 
@@ -154,6 +177,7 @@ export async function runFlow(options: RunFlowOptions): Promise<FlowRecord> {
 
   if (decision === "reject") {
     record.emailStatus = "not_attempted";
+    record.emailExternalId = undefined;
     await options.dependencies.saveResult(record);
     try {
       const sheet = await options.dependencies.appendSheetRow(sheetRow(record));
@@ -171,12 +195,9 @@ export async function runFlow(options: RunFlowOptions): Promise<FlowRecord> {
 
   let email: EmailResult;
   try {
-    email = await options.dependencies.sendApprovedEmail({
-      actionId,
-      to: options.recipientEmail || process.env.GMAIL_TO || "dry-run@example.invalid",
-      subject: outreach.subject,
-      body: outreach.body,
-    });
+    email = options.draftId && options.dependencies.sendEmailDraft
+      ? await options.dependencies.sendEmailDraft(options.draftId, actionId)
+      : await options.dependencies.sendApprovedEmail(emailInput);
   } catch (error) {
     record.emailStatus = "failed";
     record.status = "failed";

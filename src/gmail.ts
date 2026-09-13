@@ -73,12 +73,99 @@ function rawMessage(input: EmailInput): string {
 
 export function createGmailClient(options: GmailOptions = {}) {
   const executed = new Map<string, EmailResult>();
+  const createdDrafts = new Map<string, EmailResult>();
+  const sentDrafts = new Map<string, EmailResult>();
+
+  function configuredMode(): EmailMode {
+    const mode = options.mode || "dry_run";
+    if (!["dry_run", "draft", "live"].includes(mode)) {
+      throw new Error("Gmail: EMAIL_MODE must be dry_run, draft, or live");
+    }
+    return mode;
+  }
+
+  async function postGmail(
+    endpoint: string,
+    body: Record<string, unknown>,
+  ): Promise<{ id: string }> {
+    const fetchImpl = options.fetchImpl || fetch;
+    const accessToken = await resolveAccessToken(options, fetchImpl);
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + accessToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json()) as { id?: string; error?: { message?: string } };
+    if (!response.ok || !payload.id) {
+      throw new Error(
+        "Gmail: request failed" +
+          (payload.error?.message ? ": " + payload.error.message : ""),
+      );
+    }
+    return { id: payload.id };
+  }
+
   return {
-    async sendApprovedEmail(input: EmailInput): Promise<EmailResult> {
-      const mode = options.mode || "dry_run";
-      if (!["dry_run", "draft", "live"].includes(mode)) {
-        throw new Error("Gmail: EMAIL_MODE must be dry_run, draft, or live");
+    async createDraft(input: EmailInput): Promise<EmailResult> {
+      const mode = configuredMode();
+      const previous = createdDrafts.get(input.actionId);
+      if (previous) return previous;
+      if (!input.to) {
+        throw new Error("Gmail: recipient is required");
       }
+
+      if (mode === "dry_run") {
+        const result = {
+          actionId: input.actionId,
+          status: "dry_run" as const,
+          externalId: "dry-run:" + input.actionId,
+        };
+        createdDrafts.set(input.actionId, result);
+        return result;
+      }
+
+      const payload = await postGmail(
+        "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        { message: { raw: rawMessage(input) } },
+      );
+      const result = {
+        actionId: input.actionId,
+        status: "draft" as const,
+        externalId: payload.id as string,
+      };
+      createdDrafts.set(input.actionId, result);
+      return result;
+    },
+
+    async sendDraft(draftId: string, actionId = "draft:" + draftId): Promise<EmailResult> {
+      const mode = configuredMode();
+      if (mode !== "live") {
+        throw new Error("Gmail: draft sending requires GMAIL_MODE=live");
+      }
+      const previous = sentDrafts.get(draftId);
+      if (previous) return previous;
+      if (!draftId) {
+        throw new Error("Gmail: draft id is required");
+      }
+
+      const payload = await postGmail(
+        "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send",
+        { id: draftId },
+      );
+      const result = {
+        actionId,
+        status: "sent" as const,
+        externalId: payload.id as string,
+      };
+      sentDrafts.set(draftId, result);
+      return result;
+    },
+
+    async sendApprovedEmail(input: EmailInput): Promise<EmailResult> {
+      const mode = configuredMode();
       if (options.judgeMode && mode !== "draft") {
         throw new Error("Gmail: JUDGE_MODE requires EMAIL_MODE=draft");
       }
@@ -98,8 +185,6 @@ export function createGmailClient(options: GmailOptions = {}) {
         return result;
       }
 
-      const fetchImpl = options.fetchImpl || fetch;
-      const accessToken = await resolveAccessToken(options, fetchImpl);
       const endpoint =
         mode === "draft"
           ? "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
@@ -108,23 +193,7 @@ export function createGmailClient(options: GmailOptions = {}) {
         mode === "draft"
           ? { message: { raw: rawMessage(input) } }
           : { raw: rawMessage(input) };
-      const response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer " + accessToken,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json()) as { id?: string; error?: { message?: string } };
-      if (!response.ok || !payload.id) {
-        throw new Error(
-          "Gmail: " +
-            mode +
-            " failed" +
-            (payload.error?.message ? ": " + payload.error.message : ""),
-        );
-      }
+      const payload = await postGmail(endpoint, body);
       const result = {
         actionId: input.actionId,
         status: mode === "draft" ? ("draft" as const) : ("sent" as const),

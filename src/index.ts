@@ -138,14 +138,18 @@ function publicResult(result: FlowRecord): Record<string, unknown> {
     match: result.match,
     outreach: result.outreach,
     emailStatus: result.emailStatus,
+    emailExternalId: result.emailExternalId,
+    emailDraftId: result.emailDraftId,
     sheetStatus: result.sheetStatus,
     actionId: result.actionId,
   };
 }
 
 function createDependencies(): FlowDependencies {
+  const emailMode = (process.env.GMAIL_MODE || process.env.EMAIL_MODE) as
+    ("dry_run" | "draft" | "live" | undefined);
   const gmail = createGmailClient({
-    mode: (process.env.EMAIL_MODE as "dry_run" | "draft" | "live" | undefined) || "dry_run",
+    mode: emailMode || "dry_run",
     judgeMode,
     accessToken: process.env.GMAIL_ACCESS_TOKEN,
     clientId: process.env.GMAIL_CLIENT_ID,
@@ -181,6 +185,8 @@ function createDependencies(): FlowDependencies {
         judgeChannelId: judgeMode ? process.env.JUDGE_SLACK_CHANNEL_ID : undefined,
       }),
     sendApprovedEmail: gmail.sendApprovedEmail,
+    createEmailDraft: gmail.createDraft,
+    sendEmailDraft: gmail.sendDraft,
     appendSheetRow: sheets.appendResultRow,
     saveResult: (record) => saveResult(record, resultsPath),
     getResult: async (actionId) => (await getResult(actionId, resultsPath)) as FlowRecord | undefined,
@@ -231,6 +237,7 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
             generateOutreach: async () => pending.outreach,
             postApproval: async () => pending.slack,
           },
+          draftId: pending.emailDraftId,
         });
         console.log(JSON.stringify(publicResult(resumed), null, 2));
         await client.close();
@@ -264,6 +271,7 @@ async function waitForSlackApproval(profile: CapabilityProfile, pending: FlowRec
           generateOutreach: async () => pending.outreach,
           postApproval: async () => pending.slack,
         },
+        draftId: pending.emailDraftId,
       });
       console.log(JSON.stringify(publicResult(resumed), null, 2));
       await server.close();
