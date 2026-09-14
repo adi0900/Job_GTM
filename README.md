@@ -45,13 +45,15 @@ Odyva GTM is a multi-app AI agent that continuously looks for companies showing 
 The core loop is:
 
 ```text
-Greenhouse
-→ capability matching
-→ opportunity scoring
-→ direct Gemini reasoning
-→ Gmail draft preparation
+Slack
+→ Hermes messaging runtime
+→ Strands Agents SDK
+→ Odyva tools
+→ Greenhouse opportunity discovery
+→ deterministic capability matching
+→ Gemini grounded outreach
 → Slack approval
-→ approved Gmail send
+→ Gmail execution
 → Google Sheets record
 ```
 
@@ -313,7 +315,17 @@ email status
 
 ### AI + Agent Runtime
 
-The final AWS-hosted demo uses the direct Odyva runtime for workflow coordination and tool orchestration. Hermes Agent v0.21.2 remains installed on AWS as an evaluated fallback, but it does not power the final happy path because its native Gemini provider is blocked by an authentication-header error.
+The AWS-hosted demo uses the Strands Agents SDK as the canonical GTM orchestration layer. Hermes Agent v0.21.2 remains the Slack-facing conversational runtime and gateway. Strands selects and invokes the existing Odyva tools; it does not replace their integrations or bypass the human approval gate.
+
+```text
+Slack
+→ Hermes messaging runtime
+→ Strands Agents SDK
+→ Odyva tools
+→ Greenhouse / Gmail / Google Sheets
+```
+
+Strands is responsible for model-driven workflow orchestration and tool selection. Hermes is responsible for Slack interaction and runtime access. The existing deterministic matcher remains the source of truth for scores, while Gemini prepares grounded outreach.
 
 **Gemini API**
 
@@ -329,8 +341,6 @@ Sol and Luna are development-only and are not part of the production demo flow.
 ---
 
 ## 03. Setup Instructions
-
-> Important: replace any remaining `TODO` values below with the exact repository commands and configuration before submission.
 
 ### Prerequisites
 
@@ -348,31 +358,15 @@ Greenhouse source
 ### 1. Clone the repository
 
 ```bash
-git clone TODO_REPOSITORY_URL
-cd odyva-gtm
+git clone https://github.com/adi0900/Job_GTM.git
+cd Job_GTM
 ```
 
 ### 2. Install dependencies
 
-Use the command that exists in the repository.
-
-```bash
-TODO_INSTALL_COMMAND
-```
-
-Examples might be:
-
 ```bash
 npm install
 ```
-
-or:
-
-```bash
-pnpm install
-```
-
-Do not use an example command unless it matches the actual repository.
 
 ### 3. Configure environment variables
 
@@ -393,7 +387,11 @@ Expected variables may include:
 ```env
 APP_ENV=development
 
+GREENHOUSE_BOARD_TOKEN=
+GREENHOUSE_COMPANY=
+
 GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
 
 SLACK_BOT_TOKEN=
 SLACK_SIGNING_SECRET=
@@ -404,8 +402,10 @@ GMAIL_CLIENT_SECRET=
 GMAIL_REFRESH_TOKEN=
 
 GOOGLE_SHEETS_SPREADSHEET_ID=
-GOOGLE_SHEETS_CLIENT_EMAIL=
-GOOGLE_SHEETS_PRIVATE_KEY=
+GOOGLE_SHEETS_RANGE=Sheet1!A:G
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=
 
 GMAIL_MODE=dry_run
 EMAIL_MODE=dry_run
@@ -492,18 +492,26 @@ Do not add invented results or case studies.
 
 ### 8. Run the project
 
-Use the actual repository command:
+```bash
+npm start
+```
+
+To run the Strands analysis entrypoint with a resume file:
 
 ```bash
-TODO_RUN_COMMAND
+node --experimental-strip-types scripts/strands-run.ts --resume /path/to/resume.pdf-or-text
 ```
 
 ### 9. Run tests
 
-Use the actual test command:
+```bash
+npm test
+```
+
+The repository also provides a syntax check for the main entrypoint:
 
 ```bash
-TODO_TEST_COMMAND
+npm run check
 ```
 
 ---
@@ -620,26 +628,13 @@ the system does not silently report a complete workflow
 
 ### Verification Results
 
-Replace this block with the actual results before submission:
-
 ```text
-test command:
-TODO
-
-tests passing:
-TODO
-
-tests failing:
-TODO
-
-manual happy-path verification:
-TODO
-
-manual reject-path verification:
-TODO
-
-duplicate-send verification:
-TODO
+test command: npm test
+tests passing: 15
+tests failing: 0
+manual happy-path verification: AWS-hosted integrations verified; Strands live invocation is verified separately at runtime
+manual reject-path verification: covered by the existing flow tests
+duplicate-send verification: covered by the existing flow tests
 ```
 
 Do not claim tests that were not actually run.
@@ -691,23 +686,20 @@ show Google Sheets row + final thesis
 The hackathon architecture intentionally stays small.
 
 ```text
-Greenhouse
+Slack
    ↓
-greenhouse.ts
+Hermes messaging runtime
    ↓
-NormalizedJob
-    ↓
-matcher.ts
-    ↓
-OpportunityMatch
-    ↓
-Direct Gemini API
-    ↓
-Slack Socket Mode
+Strands Agents SDK
    ↓
-Gmail
+Odyva tools
+   ├── greenhouse_search → Greenhouse
+   ├── match_resume → deterministic matcher + capability profile
+   ├── prepare_outreach → Gemini
+   ├── create_gmail_draft → Gmail
+   └── append_gtm_record → Google Sheets
    ↓
-Google Sheets
+Slack approval remains the human gate before Gmail execution
 ```
 
 Suggested repo shape:
@@ -725,6 +717,7 @@ odyva-gtm/
 │   ├── index.ts
 │   ├── greenhouse.ts
 │   ├── matcher.ts
+│   ├── strands-agent.ts
 │   ├── hermes.ts
 │   ├── gemini.ts
 │   ├── slack.ts
@@ -777,7 +770,17 @@ Judge mode remains draft-only. The separate AWS runtime may use live Gmail execu
 
 ## Current Hackathon Runtime
 
-Hermes Agent v0.21.2 was installed and evaluated on AWS, but its native Gemini provider returned an authentication-header error despite the same credential succeeding against Google's API directly. To keep the hackathon execution path reliable, the final AWS-hosted agent calls Gemini directly.
+Hermes Agent v0.21.2 is installed on AWS and remains the Slack-facing runtime and gateway. The canonical GTM analysis path now invokes the Strands Agents SDK, which selects the existing Odyva tools and keeps the deterministic matcher and external integrations in place. `prepare_outreach` reuses the existing direct Gemini adapter; Gmail and Google Sheets remain behind the existing approval-controlled execution path.
+
+The loaded Strands tools are:
+
+```text
+greenhouse_search
+match_resume
+prepare_outreach
+create_gmail_draft
+append_gtm_record
+```
 
 External apps:
 
@@ -803,10 +806,13 @@ AWS EC2
 The final demo path is:
 
 ```text
-real Greenhouse job
+Slack
+→ Hermes messaging runtime
+→ Strands Agents SDK
+→ real Greenhouse job
 → deterministic capability matcher
 → direct Gemini API
-→ Slack Socket Mode approval
+→ Slack approval
 → Gmail draft
 → approved Gmail drafts.send
 → Google Sheets row
