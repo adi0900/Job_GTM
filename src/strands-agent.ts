@@ -42,7 +42,9 @@ You may research, rank and prepare autonomously.
 
 External reputation-bearing actions require human approval.
 
-Never send email without an explicit approved action.`;
+Never send email without an explicit approved action.
+
+For a complete workflow invocation, you MUST call prepare_outreach for the selected winning opportunity before returning your final response. Do not write the outreach yourself. An invocation explicitly labeled "Stage A analysis-only" may return ranked opportunities for the follow-up Stage B invocation.`;
 
 export interface StrandsMatchResult {
   company: string;
@@ -250,17 +252,21 @@ export const matchResumeTool = tool({
   },
 });
 
-export const prepareOutreachTool = tool({
-  name: "prepare_outreach",
-  description: "Generate grounded outreach through the existing direct Gemini adapter.",
-  inputSchema: z.object({
-    company: z.string().min(1),
-    role: z.string().min(1),
-    job_context: z.string().min(2),
-    resume_context: z.string().min(1),
-  }),
-  callback: async ({ company, role, job_context, resume_context }) => {
-    const jobRecord = parseJsonObject(job_context);
+export interface PrepareOutreachInput {
+  company: string;
+  role: string;
+  job_context: string;
+  resume_context: string;
+}
+
+export async function prepareStrandsOutreach({
+  company,
+  role,
+  job_context,
+  resume_context,
+}: PrepareOutreachInput): Promise<string> {
+  console.log("STRANDS_TOOL_PREPARE_OUTREACH_USED");
+  const jobRecord = parseJsonObject(job_context);
     if (resume_context.trim().length === 0) {
       throw new Error("Strands outreach: resume_context is required");
     }
@@ -304,7 +310,18 @@ export const prepareOutreachTool = tool({
     };
     runState.outreach = result;
     return JSON.stringify(result);
-  },
+}
+
+export const prepareOutreachTool = tool({
+  name: "prepare_outreach",
+  description: "Generate grounded outreach through the existing direct Gemini adapter.",
+  inputSchema: z.object({
+    company: z.string().min(1),
+    role: z.string().min(1),
+    job_context: z.string().min(2),
+    resume_context: z.string().min(1),
+  }),
+  callback: prepareStrandsOutreach,
 });
 
 const gmailDraftClient = createGmailClient({

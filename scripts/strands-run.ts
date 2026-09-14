@@ -35,41 +35,15 @@ async function readResume(args: string[]): Promise<string> {
   return readFile(source, "utf8");
 }
 
-function parseAgentJson(text: string): Record<string, unknown> | undefined {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
-  const candidate = fenced || text;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end <= start) return undefined;
-  try {
-    const parsed = JSON.parse(candidate.slice(start, end + 1));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function finalOutput(agentText: string): Record<string, unknown> {
+function finalOutput(): Record<string, unknown> {
   const state = getStrandsRunState();
-  const modelOutput = parseAgentJson(agentText);
-  const topMatches = Array.isArray(modelOutput?.top_matches)
-    ? modelOutput.top_matches
-    : state.matches;
-  const winner = modelOutput?.winner && typeof modelOutput.winner === "object"
-    ? modelOutput.winner
-    : state.matches[0];
-  const email = modelOutput?.email && typeof modelOutput.email === "object"
-    ? modelOutput.email
-    : state.outreach;
-  if (!state.jobs.length || !state.matches.length || !state.outreach || !winner || !email) {
+  if (!state.jobs.length || !state.matches.length || !state.outreach) {
     throw new Error("Strands run did not complete greenhouse, matcher, and outreach tool use");
   }
   return {
-    top_matches: topMatches,
-    winner,
-    email,
+    top_matches: state.matches,
+    winner: state.matches[0],
+    email: state.outreach,
   };
 }
 
@@ -80,7 +54,9 @@ async function main(): Promise<void> {
   console.log("strands_tools=" + STRANDS_TOOL_NAMES.join(","));
   console.log("STRANDS_AGENT_STARTED");
 
-  const result = await odyvaStrandsAgent.invoke(`Using the supplied resume evidence:
+  await odyvaStrandsAgent.invoke(`This is Stage A analysis-only of a real two-stage Strands workflow. Complete live discovery and deterministic matching only. Do not call prepare_outreach in Stage A; Stage B will call it using the verified winner. Do not return until greenhouse_search and match_resume have completed.
+
+Using the supplied resume evidence:
 
 ${resumeText}
 
@@ -88,15 +64,39 @@ ${resumeText}
 2. call match_resume using the supplied resume evidence and the greenhouse jobs JSON
 3. identify the top five deterministic matches
 4. choose the strongest opportunity
-5. call prepare_outreach for the strongest opportunity
 
-Return machine-readable JSON containing exactly these top-level fields:
-top_matches, winner, email
+Return an interim machine-readable JSON containing top_matches and winner.
 
 Do not create a Gmail draft or append a Sheets record during this analysis. Human approval remains outside the Strands run.`);
 
+  const stageAState = getStrandsRunState();
+  if (!stageAState.jobs.length || !stageAState.matches.length || !stageAState.matches[0]) {
+    throw new Error("Stage A did not complete greenhouse and matcher tool use");
+  }
+
+  const winner = stageAState.matches[0];
+  await odyvaStrandsAgent.invoke(`This is Stage B of the real Strands workflow. Use the verified winning opportunity below and the supplied resume context.
+
+Winning opportunity:
+${JSON.stringify(winner)}
+
+Resume context:
+${resumeText}
+
+Call prepare_outreach using this winning opportunity. You must use the tool and may not generate the email directly. You MUST call prepare_outreach for the selected winning opportunity before returning your final response. Do not write the outreach yourself.
+
+Pass the winning opportunity's job_id and source_url in job_context, and pass the resume context in resume_context. Wait for prepare_outreach to return successfully. Do not create a Gmail draft or append a Sheets record; human approval remains outside the Strands run.
+
+Return machine-readable JSON containing exactly these top-level fields:
+top_matches, winner, email`);
+
+  const state = getStrandsRunState();
+  if (!state.outreach) {
+    throw new Error("Stage B did not invoke prepare_outreach");
+  }
+
   console.log("STRANDS_AGENT_COMPLETED");
-  console.log(JSON.stringify(finalOutput(result.toString()), null, 2));
+  console.log(JSON.stringify(finalOutput(), null, 2));
 }
 
 main().catch((error: unknown) => {
