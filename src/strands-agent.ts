@@ -97,13 +97,16 @@ async function loadCapabilityProfile(): Promise<CapabilityProfile> {
 }
 
 function simplifiedJob(job: NormalizedJob): Record<string, unknown> {
+  const description = job.description.length > 1000
+    ? job.description.slice(0, 1000) + "..."
+    : job.description;
   return {
     company: job.company,
     role: job.role,
     job_id: job.id,
     source_url: job.sourceUrl,
     location: null,
-    description: job.description,
+    description,
     ...(job.postedAt ? { posted_at: job.postedAt } : {}),
   };
 }
@@ -267,49 +270,49 @@ export async function prepareStrandsOutreach({
 }: PrepareOutreachInput): Promise<string> {
   console.log("STRANDS_TOOL_PREPARE_OUTREACH_USED");
   const jobRecord = parseJsonObject(job_context);
-    if (resume_context.trim().length === 0) {
-      throw new Error("Strands outreach: resume_context is required");
-    }
-    const requestedJobId = typeof jobRecord.job_id === "string"
-      ? jobRecord.job_id
-      : typeof jobRecord.id === "string"
-        ? jobRecord.id
-        : undefined;
-    const verifiedJob = requestedJobId
-      ? lastGreenhouseJobs.find((job) => job.id === requestedJobId)
+  if (resume_context.trim().length === 0) {
+    throw new Error("Strands outreach: resume_context is required");
+  }
+  const requestedJobId = typeof jobRecord.job_id === "string"
+    ? jobRecord.job_id
+    : typeof jobRecord.id === "string"
+      ? jobRecord.id
       : undefined;
-    if (lastGreenhouseJobs.length > 0 && !verifiedJob) {
-      throw new Error("Strands outreach: job_context did not identify a live Greenhouse job");
-    }
-    const job: NormalizedJob = {
-      id: verifiedJob?.id || requestedJobId || "strands-job",
-      company: verifiedJob?.company || company,
-      role: verifiedJob?.role || role,
-      sourceUrl: verifiedJob?.sourceUrl || (typeof jobRecord.source_url === "string"
-        ? jobRecord.source_url
-        : typeof jobRecord.sourceUrl === "string"
-          ? jobRecord.sourceUrl
-          : ""),
-      description: verifiedJob?.description || (typeof jobRecord.description === "string" ? jobRecord.description : job_context),
-      postedAt: verifiedJob?.postedAt || (typeof jobRecord.posted_at === "string"
-        ? jobRecord.posted_at
-        : typeof jobRecord.postedAt === "string"
-          ? jobRecord.postedAt
-          : undefined),
-    };
-    const profile = await loadCapabilityProfile();
-    const match = matchOpportunity(job, profile);
-    const outreach = await generateOutreach(job, profile, match, {
-      mode: "live",
-      apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL,
-    });
-    const result = {
-      subject: outreach.subject,
-      body: sentenceLimit(outreach.body, 4),
-    };
-    runState.outreach = result;
-    return JSON.stringify(result);
+  const verifiedJob = requestedJobId
+    ? lastGreenhouseJobs.find((job) => job.id === requestedJobId)
+    : undefined;
+  if (lastGreenhouseJobs.length > 0 && !verifiedJob) {
+    throw new Error("Strands outreach: job_context did not identify a live Greenhouse job");
+  }
+  const job: NormalizedJob = {
+    id: verifiedJob?.id || requestedJobId || "strands-job",
+    company: verifiedJob?.company || company,
+    role: verifiedJob?.role || role,
+    sourceUrl: verifiedJob?.sourceUrl || (typeof jobRecord.source_url === "string"
+      ? jobRecord.source_url
+      : typeof jobRecord.sourceUrl === "string"
+        ? jobRecord.sourceUrl
+        : ""),
+    description: verifiedJob?.description || (typeof jobRecord.description === "string" ? jobRecord.description : job_context),
+    postedAt: verifiedJob?.postedAt || (typeof jobRecord.posted_at === "string"
+      ? jobRecord.posted_at
+      : typeof jobRecord.postedAt === "string"
+        ? jobRecord.postedAt
+        : undefined),
+  };
+  const profile = await loadCapabilityProfile();
+  const match = matchOpportunity(job, profile);
+  const outreach = await generateOutreach(job, profile, match, {
+    mode: "live",
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL,
+  });
+  const result = {
+    subject: outreach.subject,
+    body: sentenceLimit(outreach.body, 4),
+  };
+  runState.outreach = result;
+  return JSON.stringify(result);
 }
 
 export const prepareOutreachTool = tool({
